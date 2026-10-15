@@ -457,6 +457,80 @@ interface UnmaskOutcome {
  * transient; a name written into a file is durable, and the likely destination is a git working tree
  * that deliberately contained none. Hence the git check below, and hence the sibling-file default.
  */
+/** What one file's run needs besides the file itself. Built once per `unmask --in` invocation. */
+interface FileRun {
+  handles: Readonly<Record<string, string>>;
+  labels: Readonly<Record<string, string>>;
+  labelMode: LabelMode;
+  pathOpts: Parameters<typeof resolvePathBelow>[3];
+  inPlace: boolean;
+  dryRun: boolean;
+  /** Handles that resolved but had no label, so the identity went in instead (#106, AC 3). */
+  lacksLabel: string[];
+}
+
+/**
+ * Resolve one candidate's contents and path, and write its output unless this is a dry run.
+ * Undefined for a file excluded by `--glob`, which is not reported per file.
+ */
+function unmaskFile(c: Candidate, root: string, run: FileRun): FileResult | undefined {
+  const { handles, labels, labelMode, pathOpts, inPlace, dryRun, lacksLabel } = run;
+  // The PATH is resolved regardless of what the contents hold: a handle in a file or folder name
+  // leaks an identity even when every byte inside is clean.
+  const asPath = resolvePathBelow(root, c.path, handles, pathOpts);
+
+  if (c.skip !== undefined) {
+    // A glob miss is not interesting enough to report per file — it is the flag doing its job.
+    if (c.skip === "glob") return undefined;
+    // A skipped file is never copied or rewritten, but its NAME is still reported when it carries
+    // a handle — otherwise `--in` would silently leave an identity in the tree it was asked to
+    // clean. Renaming one is possible without reading it, so --in-place still does it below.
+    return {
+      path: c.path, resolved: 0, unresolvable: [], output: null, skip: c.skip,
+      ...(asPath.changed ? { renamed: true } : {}),
+      ...(asPath.unsafe ? { renameBlocked: "unsafe" as const } : {}),
+    };
+  }
+
+  const original = decodeUtf8(c.bytes as Uint8Array);
+  const { text, replaced, unresolved, labelless } = resolveHandlesInText(original, handles, {
+    labels,
+    preferLabel: labelMode !== "identity",
+    // Per FILE, from its extension — not unconditionally. Escaping markdown's `|` into a JSON
+    // document produced an invalid `\|` escape and made it unparseable.
+    escape: escaperFor(formatOf(c.path)),
+  });
+  for (const h of labelless) if (!lacksLabel.includes(h)) lacksLabel.push(h);
+
+  // Nothing to do at all: contents clean AND path clean. Do not write. Rewriting an identical file
+  // churns mtimes and makes every walked file look touched, which matters under version control.
+  //
+  // `asPath.unsafe` has to be carried through here, not folded into "nothing to do". A name whose
+  // handle we REFUSED to resolve — a device name, or a segment too long once composed — is not a
+  // clean name, and reporting "no handles found" for it would be exactly the silence this command
+  // exists to avoid. Found by a test written for the sanitizer that failed for this instead.
+  if (replaced === 0 && !asPath.changed && !asPath.unsafe) {
+    return { path: c.path, resolved: 0, unresolvable: unresolved, output: null };
+  }
+  if (replaced === 0 && !asPath.changed && asPath.unsafe) {
+    return {
+      path: c.path, resolved: 0, unresolvable: unresolved, output: null,
+      renamed: true, renameBlocked: "unsafe",
+    };
+  }
+
+  // In place, the file keeps its path here and is renamed in the pass below — renaming now would
+  // invalidate the directory renames that follow. Otherwise the sibling goes at the RESOLVED path,
+  // so the copy carries no handle in its own name or in any folder above it.
+  const output = inPlace ? c.path : siblingOutputPath(asPath.path);
+  if (!dryRun) writeUtf8(output, replaced > 0 ? text : original);
+  return {
+    path: c.path, resolved: replaced, unresolvable: unresolved, output,
+    ...(asPath.changed ? { renamed: true } : {}),
+    ...(asPath.unsafe ? { renameBlocked: "unsafe" as const } : {}),
+  };
+}
+
 async function unmaskFiles(ctx: Ctx, inputs: readonly string[]): Promise<ExitCode> {
   // Before any file is read, let alone written. `assertHuman` is the strict unmask-specific gate;
   // `openData` is the shared one, called for the accounting even though the identities here go to
@@ -536,69 +610,13 @@ async function unmaskFiles(ctx: Ctx, inputs: readonly string[]): Promise<ExitCod
   // about what a handle means.
   const pathOpts = { labels, ...(labelMode !== "identity" ? { preferLabel: true } : {}) };
 
+  const run: FileRun = { handles, labels, labelMode, pathOpts, inPlace, dryRun, lacksLabel: [] };
   const results: FileResult[] = [];
-  /** Handles that resolved but had no label, so the identity went in instead (#106, AC 3). */
-  const lacksLabel: string[] = [];
   for (const c of candidates) {
-    const root = rootOf.get(c.path) ?? c.path;
-    // The PATH is resolved regardless of what the contents hold: a handle in a file or folder name
-    // leaks an identity even when every byte inside is clean.
-    const asPath = resolvePathBelow(root, c.path, handles, pathOpts);
-
-    if (c.skip !== undefined) {
-      // A glob miss is not interesting enough to report per file — it is the flag doing its job.
-      if (c.skip === "glob") continue;
-      // A skipped file is never copied or rewritten, but its NAME is still reported when it carries
-      // a handle — otherwise `--in` would silently leave an identity in the tree it was asked to
-      // clean. Renaming one is possible without reading it, so --in-place still does it below.
-      results.push({
-        path: c.path, resolved: 0, unresolvable: [], output: null, skip: c.skip,
-        ...(asPath.changed ? { renamed: true } : {}),
-        ...(asPath.unsafe ? { renameBlocked: "unsafe" as const } : {}),
-      });
-      continue;
-    }
-
-    const original = decodeUtf8(c.bytes as Uint8Array);
-    const { text, replaced, unresolved, labelless } = resolveHandlesInText(original, handles, {
-      labels,
-      preferLabel: labelMode !== "identity",
-      // Per FILE, from its extension — not unconditionally. Escaping markdown's `|` into a JSON
-      // document produced an invalid `\|` escape and made it unparseable.
-      escape: escaperFor(formatOf(c.path)),
-    });
-    for (const h of labelless) if (!lacksLabel.includes(h)) lacksLabel.push(h);
-
-    // Nothing to do at all: contents clean AND path clean. Do not write. Rewriting an identical file
-    // churns mtimes and makes every walked file look touched, which matters under version control.
-    //
-    // `asPath.unsafe` has to be carried through here, not folded into "nothing to do". A name whose
-    // handle we REFUSED to resolve — a device name, or a segment too long once composed — is not a
-    // clean name, and reporting "no handles found" for it would be exactly the silence this command
-    // exists to avoid. Found by a test written for the sanitizer that failed for this instead.
-    if (replaced === 0 && !asPath.changed && !asPath.unsafe) {
-      results.push({ path: c.path, resolved: 0, unresolvable: unresolved, output: null });
-      continue;
-    }
-    if (replaced === 0 && !asPath.changed && asPath.unsafe) {
-      results.push({
-        path: c.path, resolved: 0, unresolvable: unresolved, output: null,
-        renamed: true, renameBlocked: "unsafe",
-      });
-      continue;
-    }
-
-    // In place, the file keeps its path here and is renamed in the pass below — renaming now would
-    // invalidate the directory renames that follow. Otherwise the sibling goes at the RESOLVED path,
-    // so the copy carries no handle in its own name or in any folder above it.
-    const output = inPlace ? c.path : siblingOutputPath(asPath.path);
-    if (!dryRun) writeUtf8(output, replaced > 0 ? text : original);
-    results.push({
-      path: c.path, resolved: replaced, unresolvable: unresolved, output,
-      ...(asPath.changed ? { renamed: true } : {}),
-      ...(asPath.unsafe ? { renameBlocked: "unsafe" as const } : {}),
-    });
+    const result = unmaskFile(c, rootOf.get(c.path) ?? c.path, run);
+    if (result !== undefined) results.push(result);
   }
+  const lacksLabel = run.lacksLabel;
 
   // Renames are their own phase: they mutate the tree, and must run after every file is written but
   // before anything is reported, or the report names paths that have since moved.
