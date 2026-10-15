@@ -14,7 +14,8 @@ import { persistHandles } from "../core/handles.ts";
 import { emitCommandEcho } from "../core/commandline.ts";
 import { loadHandles } from "../core/handles.ts";
 import { parseLiteKey } from "../core/text.ts";
-import { disclosure, isHandle, pseudonymizeDocument, resolveHandle } from "../core/privacy.ts";
+import { disclosure, pseudonymizeDocument } from "../core/privacy.ts";
+import { isHandle, resolveHandle } from "../core/reidentify.ts";
 
 export async function runGet(ctx: Ctx): Promise<ExitCode> {
   const first = ctx.args.positionals[0];

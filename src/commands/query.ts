@@ -18,7 +18,8 @@ import {
   fetchDefaultColumns, filterUnusableReason, resolveLiteColumns, validateTokens,
   type QueryTokenInfo,
 } from "../core/tokens.ts";
-import { disclosure, isHandle, resolveHandle } from "../core/privacy.ts";
+import { disclosure } from "../core/privacy.ts";
+import { isHandle, resolveHandle } from "../core/reidentify.ts";
 import { loadHandles } from "../core/handles.ts";
 import { emitCommandEcho } from "../core/commandline.ts";
 import { persistHandles } from "../core/handles.ts";

@@ -11,9 +11,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { clearHandles, handlesPath, loadHandles, saveHandles } from "../src/core/handles.ts";
-import {
-  createRecorder, HANDLE_PREFIX, isHandle, resolvePolicy, resolveHandle, surrogate,
-} from "../src/core/privacy.ts";
+import { createRecorder, HANDLE_PREFIX, resolvePolicy, surrogate } from "../src/core/privacy.ts";
+import { isHandle, resolveHandle } from "../src/core/reidentify.ts";
 import { UsageError } from "../src/core/errors.ts";
 
 let dir: string;

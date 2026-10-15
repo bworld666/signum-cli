@@ -23,9 +23,8 @@ import {
   clearHandles, handlesPath, loadHandleEntries, loadHandles, saveHandles, stripStoredLabels,
   type HandleEntry,
 } from "../core/handles.ts";
-import {
-  canonicalHandle, HANDLE_PREFIX, isHandle, resolveHandle, resolveHandlesInText,
-} from "../core/privacy.ts";
+import { HANDLE_PREFIX } from "../core/privacy.ts";
+import { canonicalHandle, isHandle, resolveHandle, resolveHandlesInText } from "../core/reidentify.ts";
 import {
   checkIgnored, decodeUtf8, discover, escaperFor, formatOf, gitRootOf, renameNoClobber,
   resolvePathBelow, resolveSegment,
