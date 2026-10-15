@@ -4,7 +4,7 @@
  * STORY-09 (non-interactive by construction) · STORY-51 (agent gate) · STORY-63 (errors route to help)
  */
 
-import { assertKnownFlags, BUILT_INS, parseArgs, type ParsedArgs } from "./core/args.ts";
+import { assertKnownFlags, BUILT_INS, flagCheckPath, parseArgs, type ParsedArgs } from "./core/args.ts";
 import { nearest } from "./core/text.ts";
 import { CliError, ExitCode, UsageError, exitCodeOf } from "./core/errors.ts";
 import { detectCallerContext, type CallerDetection } from "./core/caller.ts";
@@ -188,43 +188,15 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitCode> {
   };
 
   switch (args.kind) {
-    case "builtin":
-      switch (args.command) {
-        case "version":
-          assertKnownFlags(args, ["version"]);
-          return await runVersion(ctx);
-        case "auth": {
-          // Validate against the SUBCOMMAND's flags once it's known to be a real one; an
-          // invalid subcommand should get its own "unknown subcommand" error, not a flag one.
-          const sub = args.positionals[0]?.toLowerCase();
-          if (sub === "login" || sub === "status" || sub === "logout") {
-            assertKnownFlags(args, ["auth", sub]);
-          }
-          return await runAuth(ctx);
-        }
-        case "types":
-        case "queries":
-        case "operations":
-        case "explain":
-          assertKnownFlags(args, [args.command]);
-          return await runDiscover(ctx, args.command);
-        case "query":
-          assertKnownFlags(args, ["query"]);
-          return await runQuery(ctx);
-        case "get":
-          assertKnownFlags(args, ["get"]);
-          return await runGet(ctx);
-        case "unmask":
-          assertKnownFlags(args, ["unmask"]);
-          return await runUnmask(ctx);
-        case "cache": {
-          const sub = args.positionals[0]?.toLowerCase();
-          if (sub === "show" || sub === "clear" || sub === "path") assertKnownFlags(args, ["cache", sub]);
-          else assertKnownFlags(args, ["cache"]);
-          return runCache(ctx);
-        }
-      }
-      break;
+    case "builtin": {
+      const handler = args.command !== undefined ? HANDLERS[args.command] : undefined;
+      if (handler === undefined) break;
+      // Validate against the SUBCOMMAND's flags once it's known to be a real one; an invalid
+      // subcommand should get its own "unknown subcommand" error, not a flag one.
+      const path = flagCheckPath(args.command as string, args.positionals[0]);
+      if (path !== undefined) assertKnownFlags(args, path);
+      return await handler(ctx, args.command as string);
+    }
 
     case "operation-key":
     case "verb-noun": {
@@ -268,6 +240,25 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitCode> {
     hint: "Run `signum help` to see available commands.",
   });
 }
+
+type Handler = (ctx: Ctx, command: string) => Promise<ExitCode> | ExitCode;
+
+/**
+ * One entry per built-in except `help`, which is answered before any configuration is read. A test
+ * pins these keys to `COMMANDS`, so a command cannot be declared without being dispatched (#124).
+ */
+export const HANDLERS: Readonly<Record<string, Handler>> = {
+  version: (ctx) => runVersion(ctx),
+  auth: (ctx) => runAuth(ctx),
+  types: (ctx) => runDiscover(ctx, "types"),
+  queries: (ctx) => runDiscover(ctx, "queries"),
+  operations: (ctx) => runDiscover(ctx, "operations"),
+  explain: (ctx) => runDiscover(ctx, "explain"),
+  query: (ctx) => runQuery(ctx),
+  get: (ctx) => runGet(ctx),
+  unmask: (ctx) => runUnmask(ctx),
+  cache: (ctx) => runCache(ctx),
+};
 
 /**
  * Commands that used to exist under another name.

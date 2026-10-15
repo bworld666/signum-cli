@@ -11,7 +11,7 @@
 import type { Ctx } from "../cli.ts";
 import { ExitCode, NotFoundError, UsageError } from "../core/errors.ts";
 import { renderDocument } from "../core/output.ts";
-import { BUILT_INS, isBuiltIn } from "../core/args.ts";
+import { isBuiltIn } from "../core/args.ts";
 import {
   findType, loadMetadata, queryableTypes, suggestTypes, type Metadata, type TypeInfo,
 } from "../core/metadata.ts";
@@ -478,5 +478,3 @@ export async function runDiscover(
   }
 }
 
-/** Exposed for the dispatch-invariant test. */
-export const BUILT_IN_NAMES = BUILT_INS;
