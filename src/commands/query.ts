@@ -19,7 +19,7 @@ import {
   type QueryTokenInfo,
 } from "../core/tokens.ts";
 import { disclosure, isHandle, resolveHandle } from "../core/privacy.ts";
-import { loadHandles } from "../core/config.ts";
+import { loadHandles } from "../core/handles.ts";
 import { emitCommandEcho } from "../core/commandline.ts";
 import { persistHandles } from "../core/handles.ts";
 import {

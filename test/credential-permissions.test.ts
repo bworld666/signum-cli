@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkPermissions, permissionsAreUnenforceable, saveCredential, loadCredential } from "../src/core/config.ts";
+import { checkPermissions, permissionsAreUnenforceable, saveCredential, loadCredential } from "../src/core/credentials.ts";
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "signum-perm-")); });

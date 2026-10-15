@@ -204,7 +204,7 @@ describe("`signum cache clear` (AC-24.3)", () => {
     // The auth/anon split is invisible to the user (config.ts cachePath), so clearing "the cache
     // for this target" must not leave half of it behind for them to trip over later.
     await warm(); // anonymous
-    const { saveMetadataCache } = await import("../src/core/config.ts");
+    const { saveMetadataCache } = await import("../src/core/metadata-cache.ts");
     saveMetadataCache(baseUrl, true, REFLECTION, undefined, { SIGNUM_CONFIG_DIR: dir } as NodeJS.ProcessEnv);
 
     const before = await cli(["cache", "show", "--json"]);

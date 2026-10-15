@@ -12,7 +12,7 @@ import { flag } from "../core/ctx.ts";
 import { resolveTarget } from "../core/target.ts";
 import { persistHandles } from "../core/handles.ts";
 import { emitCommandEcho } from "../core/commandline.ts";
-import { loadHandles } from "../core/config.ts";
+import { loadHandles } from "../core/handles.ts";
 import { parseLiteKey } from "../core/text.ts";
 import { disclosure, isHandle, pseudonymizeDocument, resolveHandle } from "../core/privacy.ts";
 

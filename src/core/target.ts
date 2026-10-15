@@ -5,7 +5,7 @@
 
 import type { Ctx } from "./ctx.ts";
 import { SignumHttp } from "./http.ts";
-import { loadCredential, type StoredCredential } from "./config.ts";
+import { loadCredential, type StoredCredential } from "./credentials.ts";
 import { normalizeUrl } from "./text.ts";
 import { NotAuthenticatedError, UsageError } from "./errors.ts";
 

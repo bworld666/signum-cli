@@ -22,7 +22,7 @@ import { renderDataDocument } from "../core/output.ts";
 import {
   clearHandles, handlesPath, loadHandleEntries, loadHandles, saveHandles, stripStoredLabels,
   type HandleEntry,
-} from "../core/config.ts";
+} from "../core/handles.ts";
 import {
   canonicalHandle, HANDLE_PREFIX, isHandle, resolveHandle, resolveHandlesInText,
 } from "../core/privacy.ts";

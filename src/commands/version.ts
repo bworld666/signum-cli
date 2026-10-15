@@ -8,7 +8,7 @@
 import type { Ctx } from "../core/ctx.ts";
 import { ExitCode } from "../core/errors.ts";
 import { renderDocument } from "../core/output.ts";
-import { loadCredential } from "../core/config.ts";
+import { loadCredential } from "../core/credentials.ts";
 import { SignumHttp } from "../core/http.ts";
 
 // M4 (Brooks review): single source of truth — read the version from package.json rather

@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli.ts";
 import type { Io } from "../src/core/ctx.ts";
-import { loadHandleEntries, saveHandles, stripStoredLabels } from "../src/core/config.ts";
+import { loadHandleEntries, saveHandles, stripStoredLabels } from "../src/core/handles.ts";
 import { ExitCode } from "../src/core/errors.ts";
 import {
   createRecorder, resolveHandlesInText, resolvePolicy, surrogate,

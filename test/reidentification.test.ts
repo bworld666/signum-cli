@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clearHandles, handlesPath, loadHandles, saveHandles } from "../src/core/config.ts";
+import { clearHandles, handlesPath, loadHandles, saveHandles } from "../src/core/handles.ts";
 import {
   createRecorder, HANDLE_PREFIX, isHandle, resolvePolicy, resolveHandle, surrogate,
 } from "../src/core/privacy.ts";

@@ -17,7 +17,7 @@
 import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, UsageError } from "../core/errors.ts";
 import { renderDocument } from "../core/output.ts";
-import { cacheDir, clearMetadataCache, listMetadataCache, type CacheEntry } from "../core/config.ts";
+import { cacheDir, clearMetadataCache, listMetadataCache, type CacheEntry } from "../core/metadata-cache.ts";
 
 /** Anonymous and authenticated documents differ — see the note on `cachePath`. */
 function scope(entry: CacheEntry): string {

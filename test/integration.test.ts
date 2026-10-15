@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli.ts";
 import type { Io } from "../src/core/ctx.ts";
-import { loadHandles, saveHandles } from "../src/core/config.ts";
+import { loadHandles, saveHandles } from "../src/core/handles.ts";
 import { ExitCode } from "../src/core/errors.ts";
 // Asserted via the constant, not a literal: the prefix changed once (ref: -> ref_) and a literal
 // here would have to be found and edited again next time.

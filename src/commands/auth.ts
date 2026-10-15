@@ -9,7 +9,7 @@
 import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, NotAuthenticatedError, TransportError, UsageError } from "../core/errors.ts";
 import { renderDocument } from "../core/output.ts";
-import { deleteCredential, loadCredential, permissionsAreUnenforceable, saveCredential } from "../core/config.ts";
+import { deleteCredential, loadCredential, permissionsAreUnenforceable, saveCredential } from "../core/credentials.ts";
 import { SignumHttp } from "../core/http.ts";
 import { flag } from "../core/ctx.ts";
 import { resolveTarget } from "../core/target.ts";

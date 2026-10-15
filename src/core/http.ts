@@ -16,7 +16,7 @@ import {
   ConcurrencyError, NotAuthenticatedError, NotAuthorizedError, NotFoundError,
   TransportError, ValidationError, CliError, ExitCode,
 } from "./errors.ts";
-import { rotateCredential } from "./config.ts";
+import { rotateCredential } from "./credentials.ts";
 
 export const REDACTED = "<redacted>";
 
