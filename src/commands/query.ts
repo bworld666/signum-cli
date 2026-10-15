@@ -27,7 +27,8 @@ import {
   collectFilterTokens, lowerFilterExpressions, parseFilterExpression, type FilterWire,
 } from "../core/filter.ts";
 import { opt, optAll, flag } from "../core/ctx.ts";
-import { resolveTarget } from "../core/target.ts";
+import { resolveTarget, type Target } from "../core/target.ts";
+import type { SignumHttp } from "../core/http.ts";
 import { readFileSync } from "node:fs";
 
 interface OrderSpec { token: string; orderType: "Ascending" | "Descending" }
@@ -138,14 +139,13 @@ function resolveHandlesInFilters(
 /** Names the data in a refusal message, and keeps the two `openData` calls in step. */
 const DATA_KIND = "query results";
 
-export async function runQuery(ctx: Ctx): Promise<ExitCode> {
-  const queryKey = ctx.args.positionals[0];
-  if (queryKey === undefined) {
-    throw new UsageError("`query` needs a query key", {
-      hint: "signum queries            list available queries\nsignum query Order --top 20",
-    });
-  }
-
+/**
+ * The inputs that can be checked without a server: filters and pagination. Runs before the privacy
+ * gate, so a mistake in the caller's own input is reported even under a detected agent.
+ */
+function parseLocalInputs(ctx: Ctx): {
+  groupEnabled: boolean; dslFilters: FilterWire[]; jsonFilters: FilterWire[]; pagination: unknown;
+} {
   // Parse --filter FIRST, before the privacy gate: a syntax error is not data — it is a
   // diagnostic about the agent's OWN input, which it needs to see to correct itself. Gating
   // it behind "refusing to emit data" would hide a parse error from exactly the caller who
@@ -181,31 +181,29 @@ export async function runQuery(ctx: Ctx): Promise<ExitCode> {
   // fix two unrelated things before being told what was actually wrong with their command. Same
   // "two round trips of confusion" argument the filter already makes below.
   const pagination = parsePagination(ctx);
+  return { groupEnabled, dslFilters, jsonFilters, pagination };
+}
 
-  // The gate is unconditional from here on, evaluated before touching credentials or the
-  // network: being told to fix auth and *then* refused would be two round trips of confusion.
-  // --explain emits no data, so it stays exempt. The writer this returns is discarded; the
-  // render paths below open their own. `openData` is side-effect-free, so that is free.
-  if (!ctx.args.flags.explain) ctx.openData(DATA_KIND);
+interface ColumnPlan {
+  /** The columns as the caller named them, for placing the hoisted `Entity` column (AC-21.2). */
+  requestedColumns: string[];
+  orders: OrderSpec[];
+  /** What is actually sent: the caller's columns, `--resolve`-rewritten, or the query's defaults. */
+  effectiveColumns: string[];
+  columnLabels: Record<string, string>;
+}
 
-  // requireAuth is conditional on --explain: it sends nothing, so it must not need a
-  // credential (QA finding — this previously blocked previewing a request before ever
-  // logging in). The metadata fetch below is anonymous either way; only the real
-  // executeQuery/queryValue call actually needs the token, and SignumHttp enforces that
-  // itself if one is missing.
-  const target = resolveTarget(ctx, { requireAuth: !ctx.args.flags.explain });
-
-  // Validate the query key against cached metadata so a typo costs no round trip (AC-20.7).
-  // `resolveQueryKey` is the SAME resolution `signum queries` lists from, so a key this accepts
-  // is a key that was offered, and vice versa (Brooks review: those were two definitions).
-  const md = await loadMetadata({
-    url: target.url, http: target.http, offline: ctx.args.flags.offline,
-    env: ctx.io.env, warn: (l) => ctx.io.err(l),
-  });
-  resolveQueryKey(md, queryKey);
-
-  // Needed before column resolution: a count transfers no rows, so it needs no columns.
-  const wantCount = flag(ctx, "count");
+/**
+ * Validate every token the caller named and settle which columns to request. Needs the server, so
+ * it runs after the gate.
+ */
+async function planColumns(
+  ctx: Ctx,
+  http: SignumHttp,
+  queryKey: string,
+  inputs: { groupEnabled: boolean; wantCount: boolean; filters: FilterWire[] },
+): Promise<ColumnPlan> {
+  const { groupEnabled, wantCount } = inputs;
 
   // AC-20.3: "--column selects columns by token … Omitted, the query's default columns are used."
   //
@@ -242,12 +240,12 @@ export async function runQuery(ctx: Ctx): Promise<ExitCode> {
   // #97 added the third slot: tokens named in `--filter` and `--filter-json`, at every nesting
   // depth. They go LAST so the two positional reads below stay valid — `--resolve` takes the column
   // slice off the front, the filter kind check takes its own slice off the back.
-  const filterTokens = collectFilterTokens([...dslFilters, ...jsonFilters]);
+  const filterTokens = collectFilterTokens(inputs.filters);
   const namedTokens = [...requestedColumns, ...orders.map((o) => o.token), ...filterTokens];
   let namedInfo: QueryTokenInfo[] = [];
   if (namedTokens.length > 0) {
     try {
-      namedInfo = await validateTokens(target.http, queryKey, namedTokens);
+      namedInfo = await validateTokens(http, queryKey, namedTokens);
     } catch (err) {
       // `--explain` sends nothing and must work without a credential, but parseTokens needs one
       // (QueryController is not [SignumAllowAnonymous]). Degrade with a note rather than fail, the
@@ -287,7 +285,7 @@ export async function runQuery(ctx: Ctx): Promise<ExitCode> {
     // --group is excluded: a grouped query's columns are the grouping keys plus aggregates, which
     // only the caller can choose. Defaulting them would invent a query nobody asked for.
     try {
-      const defaults = await fetchDefaultColumns(target.http, queryKey);
+      const defaults = await fetchDefaultColumns(http, queryKey);
       // The description already carries each column's filterType, so --resolve is free here.
       if (resolveLites) {
         const resolved = resolveLiteColumns(defaults);
@@ -310,6 +308,112 @@ export async function runQuery(ctx: Ctx): Promise<ExitCode> {
       }
     }
   }
+
+  return { requestedColumns, orders, effectiveColumns, columnLabels };
+}
+
+/** `--count`: a single number, sent through the data boundary because it is derived from rows. */
+async function runCount(ctx: Ctx, target: Target, queryKey: string, request: Record<string, unknown>): Promise<ExitCode> {
+  const res = await target.http.request<unknown>({
+    method: "POST",
+    path: `api/query/queryValue/${encodeURIComponent(queryKey)}`,
+    body: { ...request, valueToken: "Count" },
+  });
+  // A count is derived from rows, so it goes out through the data boundary like rows do.
+  const out = ctx.openData(DATA_KIND);
+  if (ctx.format === "json" || ctx.format === "ndjson") {
+    renderDataDocument({ queryKey, count: res.body }, { format: ctx.format, write: out });
+  } else {
+    out(`${String(res.body)}\n`);
+  }
+  return ExitCode.Ok;
+}
+
+async function runTable(
+  ctx: Ctx,
+  target: Target,
+  queryKey: string,
+  request: Record<string, unknown>,
+  plan: ColumnPlan,
+): Promise<ExitCode> {
+  const res = await target.http.request<RawResultTable>({
+    method: "POST",
+    path: `api/query/executeQuery/${encodeURIComponent(queryKey)}`,
+    body: request,
+  });
+
+  // The de-interning boundary: nothing downstream sees a raw row (AC-21.1). The requested
+  // column order goes in so the hoisted `Entity` column comes back at the position the user
+  // asked for, in every format (AC-21.2).
+  const table = resolveResultTable(res.body, {
+    requestedColumns: plan.requestedColumns, columnLabels: plan.columnLabels, privacy: ctx.privacy,
+  });
+
+  // Persist BEFORE emitting. A handle we have printed but not stored is exactly the unresolvable
+  // handle AC-53.5 exists to prevent — and we would have created it ourselves.
+  persistHandles(ctx, table.mintedHandleDetails);
+
+  renderResultTable(table, {
+    format: ctx.format,
+    write: ctx.openData(DATA_KIND),
+    warn: (line) => ctx.io.err(line + "\n"),
+    // QA finding: ctx.color was computed (TTY + NO_COLOR detection) but never consumed —
+    // colour output didn't exist. Threaded through here now.
+    color: ctx.color,
+  });
+
+  // AC-52.6: state what was replaced and that coverage is incomplete. Silent partial protection
+  // invites false confidence, which is worse than none.
+  const note = disclosure(ctx.privacy, table.pseudonymized);
+  if (note !== "") ctx.io.err("\n" + note);
+
+  // Total is reported distinctly from rows returned, so a page is never mistaken for all (AC-21.5).
+  if (ctx.format === "table" && table.totalElements !== undefined && table.totalElements > table.rows.length) {
+    ctx.io.err(`\n${table.rows.length} of ${table.totalElements} rows (use --top, --page, or --all)\n`);
+  }
+  return ExitCode.Ok;
+}
+
+export async function runQuery(ctx: Ctx): Promise<ExitCode> {
+  const queryKey = ctx.args.positionals[0];
+  if (queryKey === undefined) {
+    throw new UsageError("`query` needs a query key", {
+      hint: "signum queries            list available queries\nsignum query Order --top 20",
+    });
+  }
+
+  // Local diagnostics FIRST, before the privacy gate — see parseLocalInputs.
+  const { groupEnabled, dslFilters, jsonFilters, pagination } = parseLocalInputs(ctx);
+
+  // The gate is unconditional from here on, evaluated before touching credentials or the
+  // network: being told to fix auth and *then* refused would be two round trips of confusion.
+  // --explain emits no data, so it stays exempt. The writer this returns is discarded; the
+  // render paths below open their own. `openData` is side-effect-free, so that is free.
+  if (!ctx.args.flags.explain) ctx.openData(DATA_KIND);
+
+  // requireAuth is conditional on --explain: it sends nothing, so it must not need a
+  // credential (QA finding — this previously blocked previewing a request before ever
+  // logging in). The metadata fetch below is anonymous either way; only the real
+  // executeQuery/queryValue call actually needs the token, and SignumHttp enforces that
+  // itself if one is missing.
+  const target = resolveTarget(ctx, { requireAuth: !ctx.args.flags.explain });
+
+  // Validate the query key against cached metadata so a typo costs no round trip (AC-20.7).
+  // `resolveQueryKey` is the SAME resolution `signum queries` lists from, so a key this accepts
+  // is a key that was offered, and vice versa (Brooks review: those were two definitions).
+  const md = await loadMetadata({
+    url: target.url, http: target.http, offline: ctx.args.flags.offline,
+    env: ctx.io.env, warn: (l) => ctx.io.err(l),
+  });
+  resolveQueryKey(md, queryKey);
+
+  // Needed before column resolution: a count transfers no rows, so it needs no columns.
+  const wantCount = flag(ctx, "count");
+
+  const plan = await planColumns(ctx, target.http, queryKey, {
+    groupEnabled, wantCount, filters: [...dslFilters, ...jsonFilters],
+  });
+  const { orders, effectiveColumns } = plan;
 
   const columns = effectiveColumns.map((token) => ({ token }));
   // DSL and --filter-json are combined by concatenation — both are ANDed at the top level,
@@ -346,54 +450,7 @@ export async function runQuery(ctx: Ctx): Promise<ExitCode> {
     return ExitCode.Ok;
   }
 
-  if (wantCount) {
-    const res = await target.http.request<unknown>({
-      method: "POST",
-      path: `api/query/queryValue/${encodeURIComponent(queryKey)}`,
-      body: { ...request, valueToken: "Count" },
-    });
-    // A count is derived from rows, so it goes out through the data boundary like rows do.
-    const out = ctx.openData(DATA_KIND);
-    if (ctx.format === "json" || ctx.format === "ndjson") {
-      renderDataDocument({ queryKey, count: res.body }, { format: ctx.format, write: out });
-    } else {
-      out(`${String(res.body)}\n`);
-    }
-    return ExitCode.Ok;
-  }
-
-  const res = await target.http.request<RawResultTable>({
-    method: "POST",
-    path: `api/query/executeQuery/${encodeURIComponent(queryKey)}`,
-    body: request,
-  });
-
-  // The de-interning boundary: nothing downstream sees a raw row (AC-21.1). The requested
-  // column order goes in so the hoisted `Entity` column comes back at the position the user
-  // asked for, in every format (AC-21.2).
-  const table = resolveResultTable(res.body, { requestedColumns, columnLabels, privacy: ctx.privacy });
-
-  // Persist BEFORE emitting. A handle we have printed but not stored is exactly the unresolvable
-  // handle AC-53.5 exists to prevent — and we would have created it ourselves.
-  persistHandles(ctx, table.mintedHandleDetails);
-
-  renderResultTable(table, {
-    format: ctx.format,
-    write: ctx.openData(DATA_KIND),
-    warn: (line) => ctx.io.err(line + "\n"),
-    // QA finding: ctx.color was computed (TTY + NO_COLOR detection) but never consumed —
-    // colour output didn't exist. Threaded through here now.
-    color: ctx.color,
-  });
-
-  // AC-52.6: state what was replaced and that coverage is incomplete. Silent partial protection
-  // invites false confidence, which is worse than none.
-  const note = disclosure(ctx.privacy, table.pseudonymized);
-  if (note !== "") ctx.io.err("\n" + note);
-
-  // Total is reported distinctly from rows returned, so a page is never mistaken for all (AC-21.5).
-  if (ctx.format === "table" && table.totalElements !== undefined && table.totalElements > table.rows.length) {
-    ctx.io.err(`\n${table.rows.length} of ${table.totalElements} rows (use --top, --page, or --all)\n`);
-  }
-  return ExitCode.Ok;
+  return wantCount
+    ? await runCount(ctx, target, queryKey, request)
+    : await runTable(ctx, target, queryKey, request, plan);
 }
