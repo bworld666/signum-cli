@@ -31,7 +31,8 @@ import {
   resolvePathBelow, resolveSegment,
   siblingOutputPath, writeUtf8, type Candidate, type IgnoreStatus, type SkipReason,
 } from "../core/textfiles.ts";
-import { flag, opt, optAll, resolveTarget } from "./context.ts";
+import { flag, opt, optAll } from "../core/ctx.ts";
+import { resolveTarget } from "../core/target.ts";
 import { resolveResultTable, type RawResultTable } from "../core/resulttable.ts";
 import { TO_STRING_TOKEN } from "../core/tokens.ts";
 import { existsSync } from "node:fs";

@@ -20,11 +20,13 @@ import {
 } from "../core/tokens.ts";
 import { disclosure, isHandle, resolveHandle } from "../core/privacy.ts";
 import { loadHandles } from "../core/config.ts";
-import { emitCommandEcho, persistHandles } from "./context.ts";
+import { emitCommandEcho } from "../core/commandline.ts";
+import { persistHandles } from "../core/handles.ts";
 import {
   collectFilterTokens, lowerFilterExpressions, parseFilterExpression, type FilterWire,
 } from "../core/filter.ts";
-import { opt, optAll, flag, resolveTarget } from "./context.ts";
+import { opt, optAll, flag } from "../core/ctx.ts";
+import { resolveTarget } from "../core/target.ts";
 import { readFileSync } from "node:fs";
 
 interface OrderSpec { token: string; orderType: "Ascending" | "Descending" }

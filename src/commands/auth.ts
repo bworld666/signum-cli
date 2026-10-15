@@ -11,7 +11,8 @@ import { ExitCode, NotAuthenticatedError, TransportError, UsageError } from "../
 import { renderDocument } from "../core/output.ts";
 import { deleteCredential, loadCredential, permissionsAreUnenforceable, saveCredential } from "../core/config.ts";
 import { SignumHttp } from "../core/http.ts";
-import { flag, resolveTarget } from "./context.ts";
+import { flag } from "../core/ctx.ts";
+import { resolveTarget } from "../core/target.ts";
 
 /** Generic form, for error hints where no target URL is known (`auth status` on a fresh install). */
 const HANDOFF_INSTRUCTIONS = [

@@ -8,6 +8,7 @@ import { describe, expect, it } from "bun:test";
 import { BUILT_INS, builtInsSatisfyDispatchInvariant, flagCheckPath, flagSetsAreDisjoint, parseArgs } from "../src/core/args.ts";
 import { COMMANDS, GLOBAL_FLAGS } from "../src/core/help.ts";
 import { HANDLERS } from "../src/cli.ts";
+import { flag, optAll, type Ctx } from "../src/core/ctx.ts";
 import { detectCallerContext } from "../src/core/caller.ts";
 
 describe("dispatch invariant", () => {
@@ -229,5 +230,17 @@ describe("the sensitivity decision has exactly one home", () => {
     for (const path of ["src/commands/query.ts", "src/commands/get.ts"]) {
       expect(await Bun.file(path).text()).toContain("persistHandles(ctx,");
     }
+  });
+});
+
+describe("flag accessors (#124)", () => {
+  const ctxFor = (argv: string[]) => ({ args: parseArgs(argv, {}) }) as unknown as Ctx;
+
+  it("read a declared flag normally", () => {
+    expect(optAll(ctxFor(["query", "Order", "--filter", "Id > 1"]), "filter")).toEqual(["Id > 1"]);
+  });
+
+  it("fail loudly when command code reads a name its help spec does not declare", () => {
+    expect(() => flag(ctxFor(["query", "Order"]), "fitler")).toThrow(/not declared for 'query'/);
   });
 });

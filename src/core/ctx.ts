@@ -4,7 +4,8 @@
  * dispatcher that imports them all (#124).
  */
 
-import type { ParsedArgs } from "./args.ts";
+import { flagCheckPath, type ParsedArgs } from "./args.ts";
+import { knownFlagNames } from "./help.ts";
 import type { CallerDetection } from "./caller.ts";
 import type { DataWriter } from "./policy.ts";
 import type { PrivacyPolicy } from "./privacy.ts";
@@ -51,4 +52,35 @@ export interface Ctx {
    * (ADR 0009 Decision 1).
    */
   privacy: PrivacyPolicy;
+}
+
+/**
+ * The flag name, after checking the command declares it in help.ts (#124). A misspelt name in
+ * command code would otherwise read as "not passed" forever; this turns it into a loud failure the
+ * first time a test exercises that path. Unknown flags from the USER are rejected earlier, by
+ * `assertKnownFlags` — this guards the code, not the caller.
+ */
+function declared(ctx: Ctx, name: string): string {
+  const command = ctx.args.command;
+  if (ctx.args.kind !== "builtin" || command === undefined) return name;
+  const path = flagCheckPath(command, ctx.args.positionals[0]);
+  if (path !== undefined && !knownFlagNames(path).has(name)) {
+    throw new Error(`internal: --${name} is read but not declared for '${path.join(" ")}' in help.ts`);
+  }
+  return name;
+}
+
+/** Single option value, or undefined. */
+export function opt(ctx: Ctx, name: string): string | undefined {
+  const list = ctx.args.options.get(declared(ctx, name));
+  return list?.[list.length - 1];
+}
+
+/** All values of a repeatable option, in order. */
+export function optAll(ctx: Ctx, name: string): string[] {
+  return ctx.args.options.get(declared(ctx, name)) ?? [];
+}
+
+export function flag(ctx: Ctx, name: string): boolean {
+  return ctx.args.booleans.has(declared(ctx, name));
 }

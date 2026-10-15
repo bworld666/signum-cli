@@ -15,7 +15,8 @@ import { isBuiltIn } from "../core/args.ts";
 import {
   findType, loadMetadata, queryableTypes, suggestTypes, type Metadata, type TypeInfo,
 } from "../core/metadata.ts";
-import { flag, resolveTarget } from "./context.ts";
+import { flag } from "../core/ctx.ts";
+import { resolveTarget } from "../core/target.ts";
 import { sensitivity } from "../core/privacy.ts";
 import { fetchSubTokens, validateTokens, type QueryTokenInfo } from "../core/tokens.ts";
 
