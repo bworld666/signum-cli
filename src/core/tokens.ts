@@ -26,8 +26,10 @@
 
 import type { SignumHttp } from "./http.ts";
 import { CliError, UsageError, ValidationError } from "./errors.ts";
-import { ENTITY_TOKEN } from "./resulttable.ts";
 import { editDistance } from "./text.ts";
+
+/** The entity column's token is exactly this (`QueryDescription.cs:17` — `ColumnDescription.Entity`). */
+export const ENTITY_TOKEN = "Entity";
 
 /** `QueryTokenType` (`QueryController.cs:274-286`). Absent for an ordinary column token. */
 export type QueryTokenKind =

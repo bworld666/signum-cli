@@ -21,6 +21,7 @@
 
 import { CliError, ExitCode } from "./errors.ts";
 import { createRecorder, sensitivity, surrogate, type PrivacyPolicy } from "./privacy.ts";
+import { ENTITY_TOKEN } from "./tokens.ts";
 
 /** Raw wire shape of `ResultTable`, exactly as the server sends it. */
 export interface RawResultTable {
@@ -81,9 +82,6 @@ export interface ResolvedRow {
   readonly entity: unknown;
   readonly values: readonly unknown[];
 }
-
-/** The entity column's token is exactly this (`QueryDescription.cs:17` — `ColumnDescription.Entity`). */
-export const ENTITY_TOKEN = "Entity";
 
 export interface ResolveOptions {
   /**
