@@ -11,7 +11,13 @@ It is **not** a scaffolding or code-generation tool. That job already belongs to
 `Signum.Upgrade` (source-code migration engine, 223 scripts) and `Signum/CodeGeneration/`.
 Do not rebuild those here.
 
-**Status: pre-implementation.** No code exists yet.
+**Status: m1 (read-only core) implemented, pre-release.** Tagged `v0.1.0-b.1`…`b.5`. Commands:
+`auth`, `types`, `queries`, `operations`, `explain`, `query`, `get`, `unmask`, `cache`, `version`.
+No writes yet (m2). Entry point `src/cli.ts` dispatches to `src/commands/`; shared logic lives in
+`src/core/` — HTTP and the `X-ApiKey`/`New_Token` handling (`http.ts`), stored credentials
+(`tokens.ts`, `config.ts`), the filter DSL (`filter.ts`), `ResultTable` de-interning
+(`resulttable.ts`), and the agent data gate and pseudonymization (`policy.ts`, `privacy.ts`). Tests in
+`test/` run against mocked responses; nothing has been verified against a live server yet.
 
 **Decided:** **TypeScript compiled with Bun** to a single executable — one file, no runtime to
 install ([ADR 0006](docs/decisions/0006-typescript-bun.md), superseding ADR 0005 and ADR 0001;
@@ -23,8 +29,8 @@ targets cross-compiled from one Linux host.
 exposes *itself* as an MCP server so agents can drive any Signum app
 ([ADR 0002](docs/decisions/0002-mcp-vs-http.md)).
 
-**Requirements** are collected in [`docs/requirements.md`](docs/requirements.md) — 52 of them,
-mirrored as issues `#1`–`#47` and `#49`–`#53`, labelled
+**Requirements** are collected in [`docs/requirements.md`](docs/requirements.md) — 54 of them,
+each mirrored as an issue labelled
 [`requirement`](https://github.com/pajoma/signum-cli/labels/requirement) plus a milestone. That
 document is the source of truth; keep it and the issues in sync, via
 `tools/sync-requirement-issues.py`.
@@ -34,7 +40,7 @@ document is the source of truth; keep it and the issues in sync, via
 | | Count | Scope |
 |---|---|---|
 | [`m1`](https://github.com/pajoma/signum-cli/labels/m1) | 14 | **Read-only core.** No mutations. Safe to point at production. |
-| [`m2`](https://github.com/pajoma/signum-cli/labels/m2) | 14 | Writes, entity fidelity, concurrency, profiles, tracing. |
+| [`m2`](https://github.com/pajoma/signum-cli/labels/m2) | 16 | Writes, entity fidelity, concurrency, profiles, tracing, pseudonymization. |
 | [`m3`](https://github.com/pajoma/signum-cli/labels/m3) | 18 | MCP, scale, and the auth paths unreachable on the target app. |
 | [`always`](https://github.com/pajoma/signum-cli/labels/always) | 6 | Cross-cutting constraints; apply from the first commit, never "done". |
 
@@ -236,8 +242,8 @@ See [ADR 0007](docs/decisions/0007-ai-caller-detection-and-pseudonymization.md) 
 
 ## Git
 
-- `main` is the default branch. **Never commit or push directly to it** — feature branch and
-  PR, with human review.
+- `develop` is the default branch; `main` receives releases. **Never commit or push directly to
+  either** — feature branch and PR into `develop`, with human review.
 - Never run publishing commands (`gh release`, `npm publish`, `dotnet nuget push`).
 - The sibling framework checkout is a fork; never push to its `upstream`.
 - If an HTTPS push fails because the active PAT cannot write repository contents, use the separate
@@ -267,13 +273,17 @@ wrapper around remote code execution is a materially worse problem than the web 
 
 ## Environment
 
-Node v22.23.1 is installed. **Bun is not on `PATH`** — install it (`npm i -g bun`, or locally per
-project) before building. Nothing else is required; there is no .NET SDK or Rust toolchain and none is
-needed.
+Bun may not be on `PATH`. It is a pinned devDependency, so `npm ci` installs it locally; then run
+`./node_modules/.bin/bun` (or `npx bun`) for `bun test`, `bun src/cli.ts …` and `bun run build`.
+Nothing else is required; there is no .NET SDK or Rust toolchain and none is needed.
+
+Under an agent session the CLI detects the caller as `agent` (`signum auth status` lists the
+signals) and refuses row data without an acknowledgement or pseudonymization — expected, not a bug.
 
 Unlike every earlier iteration of these docs, the build figures here are **measured**
 ([ADR 0006](docs/decisions/0006-typescript-bun.md)): 91 MB linux-x64 (35 MB gzipped), 24 ms startup, and
-five targets cross-compiled from one Linux host. Still unmeasured: the darwin/windows/arm64 artifacts
+five targets cross-compiled from one Linux host. A darwin-arm64 build of `0.1.0-b.5` came out at
+61 MB. Still unmeasured: the darwin/windows/arm64 artifacts
 running on their actual platforms, and the MCP SDK inside a `--compile` bundle.
 
 Reading the framework needs no toolchain at all.

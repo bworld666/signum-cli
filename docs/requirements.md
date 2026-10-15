@@ -104,7 +104,7 @@ release — it was the whole product. This replaces it.
 | | Count | Meaning |
 |---|---|---|
 | **m1** | 14 | **Read-only core.** The smallest CLI that is genuinely useful and safe to point at production. No mutations at all. |
-| **m2** | 14 | **Writes and ergonomics.** Operations, entity round-trip fidelity, concurrency, profiles, tracing. |
+| **m2** | 16 | **Writes and ergonomics.** Operations, entity round-trip fidelity, concurrency, profiles, tracing, pseudonymization. |
 | **m3** | 18 | **MCP, scale, and other deployments.** Includes the four auth mechanisms unreachable on the target app. |
 | **always** | 6 | **Cross-cutting constraints**, not scheduled features. They apply from the first commit and are never "done". |
 
