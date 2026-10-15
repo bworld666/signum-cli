@@ -11,7 +11,8 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { run, type Io } from "../src/cli.ts";
+import { run } from "../src/cli.ts";
+import type { Io } from "../src/core/ctx.ts";
 import { ExitCode } from "../src/core/errors.ts";
 import { COMMANDS, findCommand, type CommandSpec } from "../src/core/help.ts";
 import { assertKnownFlags, parseArgs } from "../src/core/args.ts";

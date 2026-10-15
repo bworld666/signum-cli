@@ -16,7 +16,7 @@
  * REQ-058 rather than a server-side lookup: the surrogate→real relationship never leaves the machine.
  */
 
-import type { Ctx } from "../cli.ts";
+import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, PolicyError, UsageError } from "../core/errors.ts";
 import { renderDataDocument } from "../core/output.ts";
 import {

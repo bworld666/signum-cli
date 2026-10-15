@@ -5,7 +5,7 @@
  * available and reachable.
  */
 
-import type { Ctx } from "../cli.ts";
+import type { Ctx } from "../core/ctx.ts";
 import { ExitCode } from "../core/errors.ts";
 import { renderDocument } from "../core/output.ts";
 import { loadCredential } from "../core/config.ts";

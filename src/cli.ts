@@ -7,9 +7,9 @@
 import { assertKnownFlags, BUILT_INS, flagCheckPath, parseArgs, type ParsedArgs } from "./core/args.ts";
 import { nearest } from "./core/text.ts";
 import { CliError, ExitCode, UsageError, exitCodeOf } from "./core/errors.ts";
-import { detectCallerContext, type CallerDetection } from "./core/caller.ts";
-import { makeDataOpener, type DataWriter } from "./core/policy.ts";
-import { parseMode, resolvePolicy, type PrivacyPolicy } from "./core/privacy.ts";
+import { detectCallerContext } from "./core/caller.ts";
+import { makeDataOpener } from "./core/policy.ts";
+import { parseMode, resolvePolicy } from "./core/privacy.ts";
 import { colorEnabled, effectiveFormat, renderDocument, type OutputFormat } from "./core/output.ts";
 import {
   COMMANDS, TOPICS, findCommand, helpAsJson, renderCommand, renderOverview, topicNames,
@@ -21,49 +21,7 @@ import { runQuery } from "./commands/query.ts";
 import { runGet } from "./commands/get.ts";
 import { runCache } from "./commands/cache.ts";
 import { runUnmask } from "./commands/unmask.ts";
-
-export interface Io {
-  out: (s: string) => void;
-  err: (s: string) => void;
-  stdoutIsTty: boolean;
-  stdinIsTty: boolean;
-  env: NodeJS.ProcessEnv;
-  readStdin: () => Promise<string>;
-  /**
-   * Ask the person at the terminal something. `hidden` suppresses echo, for a credential.
-   *
-   * Absent when there is nothing to ask — no TTY, or a test that has not opted in — so every caller
-   * must handle its absence rather than assume an interactive human is there (STORY-09: never hang
-   * waiting for input that cannot arrive).
-   */
-  prompt?: ((question: string, opts?: { hidden?: boolean }) => Promise<string>) | undefined;
-}
-
-export interface Ctx {
-  args: ParsedArgs;
-  io: Io;
-  format: OutputFormat;
-  color: boolean;
-  caller: CallerDetection;
-  /**
-   * Open stdout for server DATA (rows, entities, field values) — AC-51.1. Applies the ADR 0007
-   * gate and throws `PolicyError` under a detected agent without an explicit acknowledgement;
-   * m1 has no pseudonymization engine, so stopping is the honest behaviour.
-   *
-   * This is the data-output boundary, not a convention (Brooks review M3): `renderResultTable`
-   * and `renderDataDocument` accept only the `DataWriter` it returns, so a new command cannot
-   * emit rows by forgetting a call — it would have to reach for `unsafeDataWriter` and say why.
-   * Calling it is side-effect-free, so call it early too, before the network round trip, so a
-   * refusal costs no request. `--explain` emits no data and is exempt.
-   */
-  openData: (what: string) => DataWriter;
-  /**
-   * The effective pseudonymization policy (REQ-057). Resolved once, from the profile and the caller
-   * context — never from something the caller passed, except that a caller may tighten it
-   * (ADR 0009 Decision 1).
-   */
-  privacy: PrivacyPolicy;
-}
+import type { Ctx, Io } from "./core/ctx.ts";
 
 function showHelp(args: ParsedArgs, io: Io): ExitCode {
   // Help is human-facing text, so prose is the default even when piped — unlike data

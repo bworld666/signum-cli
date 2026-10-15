@@ -10,7 +10,8 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run, type Io } from "../src/cli.ts";
+import { run } from "../src/cli.ts";
+import type { Io } from "../src/core/ctx.ts";
 import { ExitCode } from "../src/core/errors.ts";
 
 interface Result { code: ExitCode; out: string; err: string }

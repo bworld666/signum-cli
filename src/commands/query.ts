@@ -9,7 +9,7 @@
  * (design/filter-expression-syntax.md "escape hatch").
  */
 
-import type { Ctx } from "../cli.ts";
+import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, NotAuthenticatedError, UsageError } from "../core/errors.ts";
 import { renderResultTable, renderDataDocument, renderDocument } from "../core/output.ts";
 import { resolveResultTable, type RawResultTable } from "../core/resulttable.ts";

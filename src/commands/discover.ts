@@ -8,7 +8,7 @@
  * credentials — api/reflection/types is anonymous.
  */
 
-import type { Ctx } from "../cli.ts";
+import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, NotFoundError, UsageError } from "../core/errors.ts";
 import { renderDocument } from "../core/output.ts";
 import { isBuiltIn } from "../core/args.ts";

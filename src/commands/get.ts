@@ -4,7 +4,7 @@
  * STORY-30 (retrieve), STORY-51 (agent data gate).
  */
 
-import type { Ctx } from "../cli.ts";
+import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, NotFoundError, UsageError } from "../core/errors.ts";
 import { renderDataDocument, renderDocument } from "../core/output.ts";
 import { findType, loadMetadata, suggestTypes } from "../core/metadata.ts";

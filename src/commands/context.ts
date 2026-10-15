@@ -3,7 +3,7 @@
  * load the credential, and build a traced HTTP client.
  */
 
-import type { Ctx } from "../cli.ts";
+import type { Ctx } from "../core/ctx.ts";
 import { SignumHttp } from "../core/http.ts";
 import { loadCredential, saveHandles, type StoredCredential } from "../core/config.ts";
 import { normalizeUrl } from "../core/text.ts";

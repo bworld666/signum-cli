@@ -6,7 +6,7 @@
  * STORY-11 (never print a credential).
  */
 
-import type { Ctx } from "../cli.ts";
+import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, NotAuthenticatedError, TransportError, UsageError } from "../core/errors.ts";
 import { renderDocument } from "../core/output.ts";
 import { deleteCredential, loadCredential, permissionsAreUnenforceable, saveCredential } from "../core/config.ts";

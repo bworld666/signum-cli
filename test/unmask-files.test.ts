@@ -15,7 +15,8 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run, type Io } from "../src/cli.ts";
+import { run } from "../src/cli.ts";
+import type { Io } from "../src/core/ctx.ts";
 import { saveHandles } from "../src/core/config.ts";
 import { ExitCode } from "../src/core/errors.ts";
 import {
