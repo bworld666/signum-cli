@@ -15,7 +15,7 @@ Do not rebuild those here.
 `auth`, `types`, `queries`, `operations`, `explain`, `query`, `get`, `unmask`, `cache`, `version`.
 No writes yet (m2). Entry point `src/cli.ts` dispatches to `src/commands/`; shared logic lives in
 `src/core/` — HTTP and the `X-ApiKey`/`New_Token` handling (`http.ts`), stored credentials
-(`tokens.ts`, `config.ts`), the filter DSL (`filter.ts`), `ResultTable` de-interning
+(`config.ts`), the filter DSL (`filter.ts`), `ResultTable` de-interning
 (`resulttable.ts`), and the agent data gate and pseudonymization (`policy.ts`, `privacy.ts`). Tests in
 `test/` run against mocked responses; nothing has been verified against a live server yet.
 
