@@ -5,7 +5,10 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { BUILT_INS, builtInsSatisfyDispatchInvariant, flagSetsAreDisjoint, parseArgs } from "../src/core/args.ts";
+import { BUILT_INS, builtInsSatisfyDispatchInvariant, flagCheckPath, flagSetsAreDisjoint, parseArgs } from "../src/core/args.ts";
+import { COMMANDS, GLOBAL_FLAGS } from "../src/core/help.ts";
+import { HANDLERS } from "../src/cli.ts";
+import { flag, optAll, type Ctx } from "../src/core/ctx.ts";
 import { detectCallerContext } from "../src/core/caller.ts";
 
 describe("dispatch invariant", () => {
@@ -14,11 +17,38 @@ describe("dispatch invariant", () => {
   });
 
   it("built-in verbs stay lowercase, so app PascalCase verbs cannot collide accidentally", () => {
-    for (const b of BUILT_INS) expect(b as string).toBe(b.toLowerCase());
+    for (const b of BUILT_INS) expect(b).toBe(b.toLowerCase());
   });
 
   it("a flag cannot both require a value and be boolean-only", () => {
     expect(flagSetsAreDisjoint()).toBe(true);
+  });
+
+  // #124: the help tree, the built-in list and the dispatcher must name the same commands, or a
+  // declared command silently falls through to operation dispatch.
+  it("every command in the help tree except `help` has a dispatch handler, and nothing more", () => {
+    const declared = COMMANDS.map((c) => c.name).filter((n) => n !== "help").sort();
+    expect(Object.keys(HANDLERS).sort()).toEqual(declared);
+  });
+
+  it("every documented global flag is consumed by the parser, never left for command flag checks", () => {
+    for (const f of GLOBAL_FLAGS) {
+      for (const name of [f.name, ...(f.alias !== undefined ? [f.alias] : [])]) {
+        const dashes = name.length === 1 ? "-" : "--";
+        // A value every value-taking global flag accepts at parse time (`--output` validates).
+        const argv = f.arg !== undefined ? [`${dashes}${name}`, f.name === "output" ? "json" : "1"] : [`${dashes}${name}`];
+        const a = parseArgs(argv, {});
+        expect({ name, options: [...a.options.keys()], booleans: [...a.booleans] })
+          .toEqual({ name, options: [], booleans: [] });
+      }
+    }
+  });
+
+  it("an undeclared subcommand skips the flag check so the command can name the real mistake", () => {
+    expect(flagCheckPath("auth", "login")).toEqual(["auth", "login"]);
+    expect(flagCheckPath("cache", "bogus")).toBeUndefined();
+    expect(flagCheckPath("cache", undefined)).toEqual(["cache"]);
+    expect(flagCheckPath("query", "Order")).toEqual(["query"]);
   });
 
   it("routes a dotted first argument to a canonical operation key", () => {
@@ -200,5 +230,17 @@ describe("the sensitivity decision has exactly one home", () => {
     for (const path of ["src/commands/query.ts", "src/commands/get.ts"]) {
       expect(await Bun.file(path).text()).toContain("persistHandles(ctx,");
     }
+  });
+});
+
+describe("flag accessors (#124)", () => {
+  const ctxFor = (argv: string[]) => ({ args: parseArgs(argv, {}) }) as unknown as Ctx;
+
+  it("read a declared flag normally", () => {
+    expect(optAll(ctxFor(["query", "Order", "--filter", "Id > 1"]), "filter")).toEqual(["Id > 1"]);
+  });
+
+  it("fail loudly when command code reads a name its help spec does not declare", () => {
+    expect(() => flag(ctxFor(["query", "Order"]), "fitler")).toThrow(/not declared for 'query'/);
   });
 });

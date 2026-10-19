@@ -4,12 +4,12 @@
  * STORY-09 (non-interactive by construction) · STORY-51 (agent gate) · STORY-63 (errors route to help)
  */
 
-import { assertKnownFlags, BUILT_INS, parseArgs, type ParsedArgs } from "./core/args.ts";
+import { assertKnownFlags, BUILT_INS, flagCheckPath, parseArgs, type ParsedArgs } from "./core/args.ts";
 import { nearest } from "./core/text.ts";
 import { CliError, ExitCode, UsageError, exitCodeOf } from "./core/errors.ts";
-import { detectCallerContext, type CallerDetection } from "./core/caller.ts";
-import { makeDataOpener, type DataWriter } from "./core/policy.ts";
-import { parseMode, resolvePolicy, type PrivacyPolicy } from "./core/privacy.ts";
+import { detectCallerContext } from "./core/caller.ts";
+import { makeDataOpener } from "./core/policy.ts";
+import { parseMode, resolvePolicy } from "./core/privacy.ts";
 import { colorEnabled, effectiveFormat, renderDocument, type OutputFormat } from "./core/output.ts";
 import {
   COMMANDS, TOPICS, findCommand, helpAsJson, renderCommand, renderOverview, topicNames,
@@ -21,49 +21,7 @@ import { runQuery } from "./commands/query.ts";
 import { runGet } from "./commands/get.ts";
 import { runCache } from "./commands/cache.ts";
 import { runUnmask } from "./commands/unmask.ts";
-
-export interface Io {
-  out: (s: string) => void;
-  err: (s: string) => void;
-  stdoutIsTty: boolean;
-  stdinIsTty: boolean;
-  env: NodeJS.ProcessEnv;
-  readStdin: () => Promise<string>;
-  /**
-   * Ask the person at the terminal something. `hidden` suppresses echo, for a credential.
-   *
-   * Absent when there is nothing to ask — no TTY, or a test that has not opted in — so every caller
-   * must handle its absence rather than assume an interactive human is there (STORY-09: never hang
-   * waiting for input that cannot arrive).
-   */
-  prompt?: ((question: string, opts?: { hidden?: boolean }) => Promise<string>) | undefined;
-}
-
-export interface Ctx {
-  args: ParsedArgs;
-  io: Io;
-  format: OutputFormat;
-  color: boolean;
-  caller: CallerDetection;
-  /**
-   * Open stdout for server DATA (rows, entities, field values) — AC-51.1. Applies the ADR 0007
-   * gate and throws `PolicyError` under a detected agent without an explicit acknowledgement;
-   * m1 has no pseudonymization engine, so stopping is the honest behaviour.
-   *
-   * This is the data-output boundary, not a convention (Brooks review M3): `renderResultTable`
-   * and `renderDataDocument` accept only the `DataWriter` it returns, so a new command cannot
-   * emit rows by forgetting a call — it would have to reach for `unsafeDataWriter` and say why.
-   * Calling it is side-effect-free, so call it early too, before the network round trip, so a
-   * refusal costs no request. `--explain` emits no data and is exempt.
-   */
-  openData: (what: string) => DataWriter;
-  /**
-   * The effective pseudonymization policy (REQ-057). Resolved once, from the profile and the caller
-   * context — never from something the caller passed, except that a caller may tighten it
-   * (ADR 0009 Decision 1).
-   */
-  privacy: PrivacyPolicy;
-}
+import type { Ctx, Io } from "./core/ctx.ts";
 
 function showHelp(args: ParsedArgs, io: Io): ExitCode {
   // Help is human-facing text, so prose is the default even when piped — unlike data
@@ -188,43 +146,15 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitCode> {
   };
 
   switch (args.kind) {
-    case "builtin":
-      switch (args.command) {
-        case "version":
-          assertKnownFlags(args, ["version"]);
-          return await runVersion(ctx);
-        case "auth": {
-          // Validate against the SUBCOMMAND's flags once it's known to be a real one; an
-          // invalid subcommand should get its own "unknown subcommand" error, not a flag one.
-          const sub = args.positionals[0]?.toLowerCase();
-          if (sub === "login" || sub === "status" || sub === "logout") {
-            assertKnownFlags(args, ["auth", sub]);
-          }
-          return await runAuth(ctx);
-        }
-        case "types":
-        case "queries":
-        case "operations":
-        case "explain":
-          assertKnownFlags(args, [args.command]);
-          return await runDiscover(ctx, args.command);
-        case "query":
-          assertKnownFlags(args, ["query"]);
-          return await runQuery(ctx);
-        case "get":
-          assertKnownFlags(args, ["get"]);
-          return await runGet(ctx);
-        case "unmask":
-          assertKnownFlags(args, ["unmask"]);
-          return await runUnmask(ctx);
-        case "cache": {
-          const sub = args.positionals[0]?.toLowerCase();
-          if (sub === "show" || sub === "clear" || sub === "path") assertKnownFlags(args, ["cache", sub]);
-          else assertKnownFlags(args, ["cache"]);
-          return runCache(ctx);
-        }
-      }
-      break;
+    case "builtin": {
+      const handler = args.command !== undefined ? HANDLERS[args.command] : undefined;
+      if (handler === undefined) break;
+      // Validate against the SUBCOMMAND's flags once it's known to be a real one; an invalid
+      // subcommand should get its own "unknown subcommand" error, not a flag one.
+      const path = flagCheckPath(args.command as string, args.positionals[0]);
+      if (path !== undefined) assertKnownFlags(args, path);
+      return await handler(ctx, args.command as string);
+    }
 
     case "operation-key":
     case "verb-noun": {
@@ -268,6 +198,25 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitCode> {
     hint: "Run `signum help` to see available commands.",
   });
 }
+
+type Handler = (ctx: Ctx, command: string) => Promise<ExitCode> | ExitCode;
+
+/**
+ * One entry per built-in except `help`, which is answered before any configuration is read. A test
+ * pins these keys to `COMMANDS`, so a command cannot be declared without being dispatched (#124).
+ */
+export const HANDLERS: Readonly<Record<string, Handler>> = {
+  version: (ctx) => runVersion(ctx),
+  auth: (ctx) => runAuth(ctx),
+  types: (ctx) => runDiscover(ctx, "types"),
+  queries: (ctx) => runDiscover(ctx, "queries"),
+  operations: (ctx) => runDiscover(ctx, "operations"),
+  explain: (ctx) => runDiscover(ctx, "explain"),
+  query: (ctx) => runQuery(ctx),
+  get: (ctx) => runGet(ctx),
+  unmask: (ctx) => runUnmask(ctx),
+  cache: (ctx) => runCache(ctx),
+};
 
 /**
  * Commands that used to exist under another name.

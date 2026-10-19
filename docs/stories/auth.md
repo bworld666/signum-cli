@@ -244,7 +244,7 @@ prompt, so that I never hang waiting for input that cannot arrive.
 - AC-09.2: Every credential can be supplied by environment variable — `SIGNUM_TOKEN` in m1, since the browser handoff is the only mechanism. It takes precedence over a stored credential, is never written to disk, and cannot receive a `New_Token` rotation, which is reported rather than attempted.
 - AC-09.3: No auth path requires a browser unless `--web` is passed explicitly.
 - AC-09.4: Auth failures are reported on stderr in a stable form; stdout stays reserved for data.
-- AC-09.5: A missing credential exits **3 (not authenticated)**, and a *rejected* one also exits 3 with a different message; a malformed **flag** is exit 2 (usage). *(Amended: the original made a missing credential usage-class, i.e. exit 2. Exit 3 is more useful — it tells a script that re-authenticating may help, which is exactly the distinction REQ-051 exists to draw, whereas exit 2 says "you typed something wrong". Implemented deliberately; see the comment in `commands/context.ts`.)*
+- AC-09.5: A missing credential exits **3 (not authenticated)**, and a *rejected* one also exits 3 with a different message; a malformed **flag** is exit 2 (usage). *(Amended: the original made a missing credential usage-class, i.e. exit 2. Exit 3 is more useful — it tells a script that re-authenticating may help, which is exactly the distinction REQ-051 exists to draw, whereas exit 2 says "you typed something wrong". Implemented deliberately; see the comment in `core/target.ts`.)*
 
 ---
 

@@ -17,7 +17,7 @@
 
 import { lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
-import { resolveHandlesInText } from "./privacy.ts";
+import { resolveHandlesInText } from "./reidentify.ts";
 
 /**
  * Above this, assume the file is not a document someone wants names in. Handle-bearing output is

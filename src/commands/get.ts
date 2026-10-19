@@ -4,14 +4,18 @@
  * STORY-30 (retrieve), STORY-51 (agent data gate).
  */
 
-import type { Ctx } from "../cli.ts";
+import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, NotFoundError, UsageError } from "../core/errors.ts";
 import { renderDataDocument, renderDocument } from "../core/output.ts";
 import { findType, loadMetadata, suggestTypes } from "../core/metadata.ts";
-import { emitCommandEcho, flag, persistHandles, resolveTarget } from "./context.ts";
-import { loadHandles } from "../core/config.ts";
+import { flag } from "../core/ctx.ts";
+import { resolveTarget } from "../core/target.ts";
+import { persistHandles } from "../core/handles.ts";
+import { emitCommandEcho } from "../core/commandline.ts";
+import { loadHandles } from "../core/handles.ts";
 import { parseLiteKey } from "../core/text.ts";
-import { disclosure, isHandle, pseudonymizeDocument, resolveHandle } from "../core/privacy.ts";
+import { disclosure, pseudonymizeDocument } from "../core/privacy.ts";
+import { isHandle, resolveHandle } from "../core/reidentify.ts";
 
 export async function runGet(ctx: Ctx): Promise<ExitCode> {
   const first = ctx.args.positionals[0];

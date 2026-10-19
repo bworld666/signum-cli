@@ -22,7 +22,7 @@
  */
 
 import { SignumHttp } from "./http.ts";
-import { loadMetadataCache, saveMetadataCache } from "./config.ts";
+import { loadMetadataCache, saveMetadataCache } from "./metadata-cache.ts";
 import { CliError, ExitCode, UsageError } from "./errors.ts";
 import { editDistance } from "./text.ts";
 

@@ -10,7 +10,8 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run, type Io } from "../src/cli.ts";
+import { run } from "../src/cli.ts";
+import type { Io } from "../src/core/ctx.ts";
 import { ExitCode } from "../src/core/errors.ts";
 
 interface Result { code: ExitCode; out: string; err: string }
@@ -213,7 +214,7 @@ describe("unmask --clear asks before destroying the mapping", () => {
   /** A profile with one handle stored. */
   async function withHandle(): Promise<string> {
     const dir = mkdtempSync(join(tmpdir(), "signum-ua-clear-"));
-    const { saveHandles } = await import("../src/core/config.ts");
+    const { saveHandles } = await import("../src/core/handles.ts");
     saveHandles({ "ref:aaaaaaaaaaaa": "Order;42" }, { SIGNUM_CONFIG_DIR: dir } as unknown as NodeJS.ProcessEnv);
     return dir;
   }
@@ -224,7 +225,7 @@ describe("unmask --clear asks before destroying the mapping", () => {
     const r = await cli(["unmask", "--clear"], { env: { SIGNUM_CONFIG_DIR: dir }, tty: true, answers: ["n"] });
     expect(r.code).toBe(ExitCode.Ok);
     expect(r.err).toContain("Left untouched");
-    const { loadHandles } = await import("../src/core/config.ts");
+    const { loadHandles } = await import("../src/core/handles.ts");
     expect(Object.keys(loadHandles({ SIGNUM_CONFIG_DIR: dir } as unknown as NodeJS.ProcessEnv))).toHaveLength(1);
     rmSync(dir, { recursive: true, force: true });
   });

@@ -15,12 +15,12 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run, type Io } from "../src/cli.ts";
-import { loadHandleEntries, saveHandles, stripStoredLabels } from "../src/core/config.ts";
+import { run } from "../src/cli.ts";
+import type { Io } from "../src/core/ctx.ts";
+import { loadHandleEntries, saveHandles, stripStoredLabels } from "../src/core/handles.ts";
 import { ExitCode } from "../src/core/errors.ts";
-import {
-  createRecorder, resolveHandlesInText, resolvePolicy, surrogate,
-} from "../src/core/privacy.ts";
+import { createRecorder, resolvePolicy, surrogate } from "../src/core/privacy.ts";
+import { resolveHandlesInText } from "../src/core/reidentify.ts";
 import {
   escaperFor, formatOf, sanitizeSegment, segmentIsUsable,
 } from "../src/core/textfiles.ts";

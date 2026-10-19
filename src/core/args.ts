@@ -14,28 +14,17 @@
 
 import { UsageError, type ExitCode } from "./errors.ts";
 import { parseOutputFormat, type OutputFormat } from "./output.ts";
-import { knownFlagNames } from "./help.ts";
+import { COMMANDS, findCommand, knownFlagNames } from "./help.ts";
 import { nearest } from "./text.ts";
 
-/** The complete built-in verb set. Adding to this can shadow an app's operation verb. */
-export const BUILT_INS = [
-  "help",
-  "version",
-  "auth",
-  "types",
-  "queries",
-  "operations",
-  "explain",
-  "query",
-  "get",
-  "cache",
-  "unmask",
-] as const;
+/**
+ * The complete built-in verb set, derived from `COMMANDS` so the help tree, the dispatcher and this
+ * list cannot disagree (#124). Adding a command there can shadow an app's operation verb.
+ */
+export const BUILT_INS: readonly string[] = COMMANDS.map((c) => c.name);
 
-export type BuiltIn = (typeof BUILT_INS)[number];
-
-export function isBuiltIn(name: string): name is BuiltIn {
-  return (BUILT_INS as readonly string[]).includes(name.toLowerCase());
+export function isBuiltIn(name: string): boolean {
+  return BUILT_INS.includes(name.toLowerCase());
 }
 
 /** Enforced by test: no built-in may contain a dot, or dispatch rule 1 breaks. */
@@ -258,6 +247,19 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = proc
  * already peeled off into the typed `flags` struct by `parseArgs` and never reach
  * `options`/`booleans`, so they can't collide with this check.
  */
+/**
+ * The help path whose flags a built-in invocation is checked against: `[command, sub]` for a
+ * declared subcommand, else `[command]`. Undefined when a command group got an undeclared
+ * subcommand, so the command reports "unknown subcommand" instead of a misleading flag error.
+ */
+export function flagCheckPath(command: string, sub: string | undefined): string[] | undefined {
+  const spec = findCommand([command]);
+  if (sub !== undefined && spec?.subcommands !== undefined) {
+    return findCommand([command, sub]) !== undefined ? [command, sub.toLowerCase()] : undefined;
+  }
+  return [command];
+}
+
 export function assertKnownFlags(args: ParsedArgs, path: readonly string[]): void {
   const known = knownFlagNames(path);
   const used = new Set<string>([...args.options.keys(), ...args.booleans]);
