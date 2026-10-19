@@ -89,3 +89,23 @@ export function makeDataOpener(
     });
   };
 }
+
+/**
+ * Refuse HTTP tracing to a detected AI caller without the acknowledgement (#128).
+ *
+ * A trace prints request URLs, which are built after a `ref_` handle is resolved locally, so they
+ * carry the real id the handle stands for — and query values besides. Pseudonymization cannot reach
+ * them, so unlike `openData` there is no surrogate path: an agent gets the trace only when a human
+ * acknowledged that data goes to a model.
+ */
+export function assertMayTrace(caller: CallerDetection, allow: boolean): void {
+  if (caller.context !== "agent" || allow) return;
+  throw new PolicyError("refusing --verbose to a detected AI caller", {
+    hint:
+      "Signals: " + caller.signals.join("; ") + ".\n" +
+      "A trace prints request URLs, which carry real ids — including the one behind a ref_ handle.\n" +
+      "Pseudonymization does not apply to them. To trace anyway, pass\n" +
+      "  --i-understand-data-goes-to-a-model\n" +
+      "or set SIGNUM_ALLOW_AGENT_DATA=1. Use --explain to see a request without sending it.",
+  });
+}

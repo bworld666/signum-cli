@@ -222,7 +222,7 @@ them to reimplement knowledge that already exists. One structured source, many r
 | `--dry-run=client\|server` | m2 | `client` ≡ `--explain`. `server` checks `canExecute` (REQ-043). |
 | `-f, --filename <path\|->` | m2 | Input from file or stdin. `@file` also accepted. |
 | `-y, --yes` | m2 | Skip confirmation. Required for mutations without a TTY. |
-| `-v, --verbose` | **m1** | HTTP tracing, credentials redacted (AC-11.2). |
+| `-v, --verbose` | **m1** | HTTP tracing, credentials redacted (AC-11.2). Refused to a detected AI caller without `--i-understand-data-goes-to-a-model`: URLs carry real ids, including the one behind a `ref_` handle (#128). |
 | `--no-color` | **m1** | Also honours `NO_COLOR`. |
 | `--timeout <dur>` | **m1** | |
 | `--caller-context <ctx>` | **m1** | Override agent detection. Loosening is logged (AC-50.4). |

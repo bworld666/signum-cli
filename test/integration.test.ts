@@ -2092,6 +2092,39 @@ describe("redaction (STORY-11)", () => {
   });
 });
 
+/**
+ * A trace prints request URLs, built after a handle is resolved, so it would hand an agent the real
+ * id behind a `ref_` handle (#128). Pseudonymization cannot reach a URL, so the trace is refused.
+ */
+describe("--verbose under a detected AI caller (#128)", () => {
+  it("is refused before any request is made", async () => {
+    const r = await cli(["get", "Order", "42", "-v"], { env: { CLAUDECODE: "1" } });
+    expect(r.code).toBe(ExitCode.Policy);
+    expect(r.err).toContain("refusing --verbose");
+    expect(r.err).not.toContain("> GET");
+    expect(r.out).toBe("");
+  });
+
+  it("is refused for metadata commands too — one rule, no per-command exceptions", async () => {
+    const r = await cli(["types", "--url", baseUrl, "--verbose"], { env: { CLAUDECODE: "1" } });
+    expect(r.code).toBe(ExitCode.Policy);
+  });
+
+  it("proceeds with the acknowledgement flag or its environment variable", async () => {
+    const flagged = await cli(["get", "Order", "42", "-v", "--i-understand-data-goes-to-a-model"], { env: { CLAUDECODE: "1" } });
+    expect(flagged.code).toBe(ExitCode.Ok);
+    expect(flagged.err).toContain("> GET");
+    const env = await cli(["get", "Order", "42", "-v"], { env: { CLAUDECODE: "1", SIGNUM_ALLOW_AGENT_DATA: "1" } });
+    expect(env.code).toBe(ExitCode.Ok);
+  });
+
+  it("is unaffected for a human caller", async () => {
+    const r = await cli(["get", "Order", "42", "-v"], { tty: true });
+    expect(r.code).toBe(ExitCode.Ok);
+    expect(r.err).toContain("> GET");
+  });
+});
+
 describe("version (previously 0% covered)", () => {
   it("reports the CLI's own version with no target configured", async () => {
     const r = await cli(["version"], { env: { SIGNUM_CONFIG_DIR: mkdtempSync(join(tmpdir(), "signum-ver-")) }, tty: true });
