@@ -302,18 +302,51 @@ an identity. The browser client decides via `canBeModified`.
 
 ## 4. Serialization rules
 
-camelCase throughout. The traps, in order of how likely they are to bite:
+camelCase throughout. The traps, in order of how likely they are to bite. The server reads entities
+with `EntityJsonConverter` in its **WebAPI** strategy (`SignumServer.cs:146-148`); the client-side
+implementation of all of this is `src/core/entity.ts`.
 
 1. **`Type` vs `EntityType`.** Full entities carry `Type` with the *clean* name
-   (`RoleEntity` → `"Role"`). Lites carry `EntityType`. **Mixing them throws.**
-2. **`ticks` is a string**, not a number. It drives optimistic concurrency.
-3. **Special properties must come first** in the JSON object, and **unknown keys are
-   rejected**.
-4. **`modified: true` must be propagated up the entity graph.** The browser does this in
-   `ajaxPostRaw` via `GraphExplorer.propagateAll`. A hand-built client must replicate it or
-   saves silently drop changes.
-5. **`MList<T>`** serializes as `[{ rowId, element }]` — not a bare array.
-6. **`Lite<T>`** in string form is `"Album;3"` (`TypeName;id`).
+   (`RoleEntity` → `"Role"`). Lites carry `EntityType`. **Mixing them throws**
+   (`EntityJsonConverter.cs:764`, `LiteJsonConverter.cs:136`).
+2. **`ticks` is a string**, not a number — parsed with `long.Parse(reader.GetString())`
+   (`EntityJsonConverter.cs:761`). It drives optimistic concurrency, and is only checked when the
+   entity is sent with `modified: true` (`:673-676`).
+3. **Special members come before data members** — `Type, id, isNew, partitionId, ticks, toStr,
+   modified, temporalId`, in any order among themselves (`:741-765`); one after a data member throws
+   (`:455-456`). **Unknown members throw** (`:458`). `propsMeta` and `mixins` are written by the
+   server; `propsMeta` is read and discarded.
+4. **`modified: true` must be propagated up the entity graph — or changes are silently dropped.** A
+   changed member on an entity whose own `modified` is not `true` is **not applied**; the server
+   creates an exception and swallows it on the spot (`EntityJsonConverter.cs:537-549`) and reports
+   success. Each nested entity is judged by its **own** flag, so every entity and embedded entity on
+   the path to a change needs it. The browser does this in `ajaxPostRaw` via
+   `GraphExplorer.propagateAll` (`Services.ts:55-60`, `Reflection.ts:2541-2708`). MList rows and Lites
+   have **no** flag of their own; the entity holding them gets it. A missing `modified` means false.
+5. **`MList<T>`** serializes as `[{ rowId, element }]` — `rowId` first, `element` second, or it throws
+   (`MListJsonConverter.cs:114-125`). A null `rowId` is a new row. An existing `rowId` is matched,
+   and the element read *into* the stored one, so an edited entity element keeps its row; a changed
+   scalar element (`MList<string>`) becomes a new row (`:146-158`). The list is replaced as a whole
+   (`MList.cs:814-828`): **rows missing from the payload are deleted**.
+6. **`Lite<T>`** members: `EntityType, ModelType?, id, partitionId?, model?, entity?` — no `toStr`; the
+   display text is `model` (`LiteJsonConverter.cs:23-68`). In string form it is `"Album;3"`
+   (`TypeName;id`).
+7. **Numbers must not pass through a JS `number`.** `decimal` is a JSON number, and numeric ids are
+   int64: `JSON.parse` rounds `0.10` to `0.1` and ids past 2^53 to a *different* id. Read entities
+   and query results (`executeQuery`, `queryValue`) with the source text of every number preserved,
+   and write it back verbatim — if the two data paths disagreed, one record would get two different
+   ids and two different privacy handles. Metadata responses carry no data and are read plainly.
+   `ResultTable` intern indices are positions, so they are safe as plain numbers. The CLI wraps each
+   one in a `JsonNumber` (`src/core/json.ts`) tagged `identifier` under `id`, `rowId` and
+   `partitionId`, `number` elsewhere — privacy recognises a Lite by an `identifier` id, so the tag is
+   what keeps an exact id from slipping past pseudonymization.
+8. **Value formats:** DateOnly `"2024-01-31"`, TimeOnly `"HH:mm:ss.FFFFFFF"`, TimeSpan `"[d.]hh:mm:ss[.fffffff]"`
+   (`DateOnlyConverter.cs`, `TimeOnlyConverter.cs`, `TimeSpanConverter.cs`); enums as their name
+   (`SignumServer.cs:48`); DateTime ISO-8601 and `byte[]` base64 (System.Text.Json defaults).
+
+`POST api/validateEntity` takes a **bare** entity, answers 200 with an empty body when valid and 400
+with the ModelState (`{ "<route>": ["message"] }`) when not (`EntityController.cs:92-96`,
+`ValidateModelFilterAttribute.cs:8-26`). It persists nothing.
 
 ### `ResultTable` is column-interned
 

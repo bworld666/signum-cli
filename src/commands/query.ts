@@ -318,6 +318,7 @@ async function runCount(ctx: Ctx, target: Target, queryKey: string, request: Rec
     method: "POST",
     path: `api/query/queryValue/${encodeURIComponent(queryKey)}`,
     body: { ...request, valueToken: "Count" },
+    lossless: true, // data, so exact — see the note in runTable
   });
   // A count is derived from rows, so it goes out through the data boundary like rows do.
   const out = ctx.openData(DATA_KIND);
@@ -340,6 +341,9 @@ async function runTable(
     method: "POST",
     path: `api/query/executeQuery/${encodeURIComponent(queryKey)}`,
     body: request,
+    // Exact numbers (#111): `JSON.parse` would print an int64 id past 2^53 as a different record's
+    // id, and mint it a handle that `get` — which reads exactly — would not match.
+    lossless: true,
   });
 
   // The de-interning boundary: nothing downstream sees a raw row (AC-21.1). The requested
