@@ -131,8 +131,10 @@ describe("get: toStr is surrogated without being asked for", () => {
     const doc = out.value as Record<string, unknown>;
     expect(doc["toStr"]).not.toBe(REAL_NAME);
     expect(out.pseudonymized).toContain("toStr");
-    // Structural fields stay readable — the id was never the leak, and hiding it would break `get`.
-    expect(doc["id"]).toBe(7);
+    // The document's own id is an identity: it becomes a handle that `get` accepts, labelled with the
+    // real toStr locally so `unmask` reads well. Type stays — it is schema, not personal data.
+    expect(String(doc["id"])).toStartWith("ref_");
+    expect(out.handleDetails[String(doc["id"])]).toEqual({ lite: "User;7", label: REAL_NAME });
     expect(doc["Type"]).toBe("User");
     cleanup();
   });

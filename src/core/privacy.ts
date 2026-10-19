@@ -604,9 +604,10 @@ export function disclosure(policy: PrivacyPolicy, pseudonymizedTokens: readonly 
  * gate change would be a leak: pseudonymization opens the agent path, and an unpseudonymized `get`
  * would then walk straight through it.
  *
- * Structural keys are never touched — replacing `Type`, `id` or `ticks` would corrupt the document
- * and break the round-trip invariants REQ-031 depends on. Note that means an entity's own `id`
- * survives: turning identity into an opaque handle is REQ-058 (#52), not this.
+ * Structural keys are never touched — replacing `Type` or `ticks` would corrupt the document and
+ * break the round-trip invariants REQ-031 depends on. The one exception is the ROOT entity's `id`:
+ * the document is an identity like any Lite, so its id becomes the same handle the query path mints
+ * for that record. Left real, `get ref_…` would hand back the very id the handle stands for.
  */
 const STRUCTURAL_KEYS = new Set(["type", "entitytype", "modeltype", "id", "ticks", "rowid", "ismodified", "modified"]);
 
@@ -619,8 +620,19 @@ export function pseudonymizeDocument(
   const recorder = createRecorder();
   const seen: string[] = [];
 
+  // An array element has no member name of its own, so it is judged under its array's name — by
+  // value, which is what catches a Lite in a plain array. Walking into it instead treated its
+  // `model` as an ordinary member and emitted the real type, id and display string.
+  const element = (n: unknown, path: string): unknown => {
+    const name = path.split(".").pop() ?? path;
+    const decision = sensitivity({ name, value: n }, policy);
+    if (!decision.pseudonymize) return walk(n, path);
+    seen.push(name);
+    return surrogate(n, name, policy, recorder);
+  };
+
   const walk = (node: unknown, path: string): unknown => {
-    if (Array.isArray(node)) return node.map((n) => walk(n, path));
+    if (Array.isArray(node)) return node.map((n) => element(n, path));
     if (node === null || typeof node !== "object" || node instanceof JsonNumber) return node;
 
     const out: Record<string, unknown> = {};
@@ -647,5 +659,24 @@ export function pseudonymizeDocument(
   };
 
   const result = walk(value, "");
+  const root = rootHandle(value, policy, recorder);
+  if (root !== undefined) {
+    (result as Record<string, unknown>)["id"] = root;
+    seen.push("id");
+  }
   return { value: result, pseudonymized: [...new Set(seen)], handles: recorder.entries(), handleDetails: recorder.detailed() };
+}
+
+/**
+ * The handle for a document's own identity, or undefined when the root is not an entity.
+ *
+ * Built as the Lite the query path would see for the same record, so both paths mint one handle,
+ * and with the entity's `toStr` as its label so `unmask` reads as well as it does for a Lite.
+ */
+function rootHandle(value: unknown, policy: PrivacyPolicy, recorder: HandleRecorder): unknown {
+  if (Array.isArray(value) || !isIdentityValue(value)) return undefined;
+  const o = value as Record<string, unknown>;
+  const toStr = o["toStr"];
+  const lite = { EntityType: o["Type"] ?? o["EntityType"], id: o["id"], ...(typeof toStr === "string" ? { model: toStr } : {}) };
+  return surrogate(lite, String(lite.EntityType), policy, recorder);
 }

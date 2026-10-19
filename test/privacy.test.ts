@@ -196,11 +196,11 @@ describe("entity documents (for `get`)", () => {
     );
     const doc = value as Record<string, unknown>;
     expect(doc["Type"]).toBe("Customer");   // structural
-    expect(doc["id"]).toBe(7);              // structural — REQ-058 handles identity, not this
+    expect(String(doc["id"])).toStartWith(HANDLE_PREFIX); // the document's own identity
     expect(doc["ticks"]).toBe("638");       // structural — REQ-031 round-trip depends on it
     expect(doc["total"]).toBe(99);          // not sensitive
     expect(doc["name"]).not.toBe("Acme GmbH");
-    expect(pseudonymized).toEqual(["name"]);
+    expect(pseudonymized).toEqual(["name", "id"]);
   });
 
   it("recurses into nested objects and arrays", () => {
@@ -211,6 +211,34 @@ describe("entity documents (for `get`)", () => {
     const line = ((value as Record<string, unknown>)["lines"] as Array<Record<string, unknown>>)[0]!;
     expect(line["email"]).not.toBe("a@b.c");
     expect(line["qty"]).toBe(2);
+  });
+
+  it("replaces a Lite inside a plain array, label and all", () => {
+    // An array element has no member name, so walking into it used to treat `model` as an ordinary
+    // member: the real type, id and display string all came through.
+    const { value, pseudonymized, handles } = pseudonymizeDocument(
+      { Type: "Project", id: 1, members: [{ EntityType: "User", id: 7, model: "Anna Müller" }, "plain"] },
+      policy(),
+    );
+    const members = (value as Record<string, unknown>)["members"] as unknown[];
+    expect(String(members[0])).toStartWith(HANDLE_PREFIX);
+    expect(members[0]).toBe(surrogate({ EntityType: "User", id: 7 }, "User", policy()));
+    expect(members[1]).toBe("plain");
+    expect(JSON.stringify(value)).not.toContain("Anna Müller");
+    expect(Object.values(handles)).toContain("User;7");
+    expect(pseudonymized).toContain("members");
+  });
+
+  it("replaces the document's own id with the handle a Lite to it would get", () => {
+    const { value, handleDetails } = pseudonymizeDocument({ Type: "Customer", id: 7, toStr: "Acme" }, policy());
+    const id = (value as Record<string, unknown>)["id"];
+    expect(id).toBe(surrogate({ EntityType: "Customer", id: 7 }, "Customer", policy()));
+    expect(handleDetails[String(id)]).toEqual({ lite: "Customer;7", label: "Acme" });
+  });
+
+  it("leaves an id alone when the root is not an entity", () => {
+    const { value } = pseudonymizeDocument({ id: 7, total: 1 }, policy());
+    expect(value).toEqual({ id: 7, total: 1 });
   });
 
   it("does nothing at all when the mode is off", () => {
@@ -290,7 +318,7 @@ describe("entity documents protect nested identities (the get leak)", () => {
 
   it("still leaves structural keys and non-sensitive values alone", () => {
     const { value } = pseudonymizeDocument({ Type: "Order", id: 42, ticks: "638", total: 99 }, policy());
-    expect(value).toEqual({ Type: "Order", id: 42, ticks: "638", total: 99 });
+    expect(value).toEqual({ Type: "Order", id: surrogate({ EntityType: "Order", id: 42 }, "Order", policy()), ticks: "638", total: 99 });
   });
 
   it("reports what it replaced, so the disclosure cannot claim safety it did not deliver", () => {
