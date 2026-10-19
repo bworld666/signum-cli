@@ -16,6 +16,7 @@ import { loadHandles } from "../core/handles.ts";
 import { parseLiteKey } from "../core/text.ts";
 import { disclosure, pseudonymizeDocument } from "../core/privacy.ts";
 import { isHandle, resolveHandle } from "../core/reidentify.ts";
+import { entityPath, fetchEntityDocument } from "../core/entity.ts";
 
 export async function runGet(ctx: Ctx): Promise<ExitCode> {
   const first = ctx.args.positionals[0];
@@ -86,7 +87,7 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
   const existsOnly = flag(ctx, "exists");
   const path = existsOnly
     ? `api/exists/${encodeURIComponent(cleanName)}/${encodeURIComponent(id)}`
-    : `api/entity/${encodeURIComponent(cleanName)}/${encodeURIComponent(id)}`;
+    : entityPath(cleanName, id);
 
   if (flag(ctx, "as-command")) {
     emitCommandEcho(ctx); // REQ-078 — see the note in query.ts
@@ -113,15 +114,12 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
     return present ? ExitCode.Ok : ExitCode.NotFound;
   }
 
-  const res = await target.http.request<unknown>({ method: "GET", path });
-  if (res.body === null || res.body === undefined || res.body === "") {
-    throw new NotFoundError(`${cleanName} ${id} not found`);
-  }
+  const body = await fetchEntityDocument(target.http, cleanName, id);
 
   // An entity is a document, not a table, so it renders as JSON in every format — and it is
   // pseudonymized by member name rather than by column (REQ-057). Without this the m2 gate change
   // would be a leak: pseudonymization opens the agent path, and `get` would walk through it raw.
-  const { value, pseudonymized, handleDetails } = pseudonymizeDocument(res.body, ctx.privacy);
+  const { value, pseudonymized, handleDetails } = pseudonymizeDocument(body, ctx.privacy);
   persistHandles(ctx, handleDetails); // before emitting — see the note in query.ts
   renderDataDocument(value, {
     format: ctx.format === "table" ? "json" : ctx.format,

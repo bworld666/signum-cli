@@ -17,7 +17,7 @@ import {
   TransportError, ValidationError, CliError, ExitCode,
 } from "./errors.ts";
 import { rotateCredential } from "./credentials.ts";
-import { parseLossless } from "./entity.ts";
+import { parseLossless } from "./json.ts";
 
 export const REDACTED = "<redacted>";
 

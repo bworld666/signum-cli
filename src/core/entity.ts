@@ -21,19 +21,7 @@
 
 import { CliError, ExitCode, NotFoundError, UsageError } from "./errors.ts";
 import type { SignumHttp } from "./http.ts";
-
-/** A JSON number kept as its exact source text, so `decimal` and int64 values survive. */
-export interface RawJson {
-  readonly rawJSON: string;
-}
-
-// ES2023's lib predates JSON.parse source access and JSON.rawJSON; Bun implements both.
-declare global {
-  interface JSON {
-    rawJSON(text: string): RawJson;
-    isRawJSON(value: unknown): value is RawJson;
-  }
-}
+import { isRawJson, type RawJson } from "./json.ts";
 
 /** Numeric primary keys arrive as raw numbers, GUID and string keys as strings. */
 export type PrimaryKey = RawJson | string;
@@ -76,40 +64,24 @@ const SPECIAL = new Set(["Type", "id", "isNew", "partitionId", "ticks", "toStr",
 /** Written by the server, read and discarded by it (`:305-331`, `:444-449`) — never edited. */
 const READ_ONLY = new Set([...SPECIAL, "propsMeta", "mixins"]);
 
-export function isRawJson(v: unknown): v is RawJson {
-  return JSON.isRawJSON(v);
-}
-
 function isObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v) && !isRawJson(v);
 }
 
-export function isEntity(v: unknown): v is EntityJson {
+function isEntity(v: unknown): v is EntityJson {
   return isObject(v) && typeof v["Type"] === "string";
 }
 
-export function isLite(v: unknown): v is LiteJson {
+function isLite(v: unknown): v is LiteJson {
   return isObject(v) && typeof v["EntityType"] === "string";
 }
 
-export function isMListRow(v: unknown): v is MListRow {
+function isMListRow(v: unknown): v is MListRow {
   return isObject(v) && Object.hasOwn(v, "rowId") && Object.hasOwn(v, "element");
 }
 
 function isMList(v: unknown): v is MListRow[] {
   return Array.isArray(v) && v.length > 0 && v.every(isMListRow);
-}
-
-/**
- * Parse a server response without losing number precision.
- *
- * `JSON.parse` turns `0.10` into `0.1` and rounds int64 ids past 2^53 — the second sends the write to
- * a DIFFERENT record. Every number is kept as its source text and written back verbatim.
- */
-export function parseLossless(text: string): unknown {
-  return JSON.parse(text, (_key, value: unknown, context?: { source?: string }) =>
-    typeof value === "number" && context?.source !== undefined ? JSON.rawJSON(context.source) : value,
-  );
 }
 
 /** A `CliError` for a payload this CLI would otherwise send malformed. Never the user's fault. */
@@ -263,15 +235,30 @@ function propagateModified(v: unknown): boolean {
   return v.modified === true;
 }
 
-/** Pre-serialized entity JSON, mintable only by `serializeEntity`. */
+/**
+ * Pre-serialized entity JSON, mintable only by `serializeEntity`.
+ *
+ * Branded with a module-private symbol, like `DataWriter` (`policy.ts`): no other module can name
+ * the key, so none can build one without a cast, and `validateEntity` checks the brand at runtime.
+ */
+const ENTITY_PAYLOAD: unique symbol = Symbol("signum.entityPayload");
+
 export interface EntityPayload {
   readonly json: string;
   readonly modified: boolean;
-  readonly __brand: "EntityPayload";
+  readonly [ENTITY_PAYLOAD]: true;
+}
+
+function assertEntityPayload(p: EntityPayload): void {
+  if (p[ENTITY_PAYLOAD] !== true) throw malformed("payload was not produced by serializeEntity");
 }
 
 /**
  * The only way to produce entity JSON for the server: check the graph, propagate `modified`, write it.
+ *
+ * It CHANGES `root`: `modified` is raised on every ancestor of a change and client-side `error`
+ * members are dropped, as the web client does. Flags are only ever raised, so serializing twice — a
+ * preview, then the real send — produces the same payload.
  *
  * `modified` on the result says whether the payload asks the server to change anything — false means
  * the server will apply nothing, and a caller must not report that as a save (AC-32.4).
@@ -279,20 +266,37 @@ export interface EntityPayload {
 export function serializeEntity(root: EntityJson): EntityPayload {
   assertWellFormed(root, "");
   const modified = propagateModified(root);
-  return { json: JSON.stringify(root), modified, __brand: "EntityPayload" } as EntityPayload;
+  return { json: JSON.stringify(root), modified, [ENTITY_PAYLOAD]: true };
 }
 
-/** `GET api/entity/{type}/{id}`, read losslessly. `cleanName` is the server's name (`RoleEntity` → `Role`). */
-export async function fetchEntity(http: SignumHttp, cleanName: string, id: string): Promise<EntityJson> {
-  const res = await http.request<unknown>({
-    method: "GET",
-    path: `api/entity/${encodeURIComponent(cleanName)}/${encodeURIComponent(id)}`,
-    lossless: true,
-  });
+/** `api/entity/{type}/{id}`. `cleanName` is the server's name (`RoleEntity` → `Role`, AC-30.4). */
+export function entityPath(cleanName: string, id: string): string {
+  return `api/entity/${encodeURIComponent(cleanName)}/${encodeURIComponent(id)}`;
+}
+
+async function fetchEntityBody(http: SignumHttp, cleanName: string, id: string, lossless: boolean): Promise<unknown> {
+  const res = await http.request<unknown>({ method: "GET", path: entityPath(cleanName, id), lossless });
   if (res.body === null || res.body === undefined || res.body === "") {
     throw new NotFoundError(`${cleanName} ${id} not found`);
   }
-  return asEntity(res.body);
+  return res.body;
+}
+
+/** Fetch an entity to edit and send back: numbers kept exact, server invariants checked. */
+export async function fetchEntity(http: SignumHttp, cleanName: string, id: string): Promise<EntityJson> {
+  return asEntity(await fetchEntityBody(http, cleanName, id, true));
+}
+
+/**
+ * Fetch an entity to DISPLAY (`signum get`), with plain JS numbers.
+ *
+ * Not lossless, deliberately: the privacy walk recognises a Lite by a `number` or `string` id
+ * (`privacy.ts` `liteKeyOf`), so a RawJson id would make an identity unrecognisable and emit it
+ * unpseudonymized. Until privacy.ts handles RawJson, `get` shows int64 ids past 2^53 and decimals
+ * the way `JSON.parse` reads them. Never send what this returns.
+ */
+export async function fetchEntityDocument(http: SignumHttp, cleanName: string, id: string): Promise<unknown> {
+  return fetchEntityBody(http, cleanName, id, false);
 }
 
 /**
@@ -302,5 +306,6 @@ export async function fetchEntity(http: SignumHttp, cleanName: string, id: strin
  * A rejection surfaces as `ValidationError` carrying the server's per-field messages.
  */
 export async function validateEntity(http: SignumHttp, payload: EntityPayload): Promise<void> {
+  assertEntityPayload(payload);
   await http.request({ method: "POST", path: "api/validateEntity", rawBody: payload.json });
 }

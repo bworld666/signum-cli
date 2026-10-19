@@ -11,9 +11,10 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import {
-  asEntity, fetchEntity, parseLossless, serializeEntity, setMember, validateEntity,
-  type EntityJson, type LiteJson,
+  asEntity, fetchEntity, serializeEntity, setMember, validateEntity,
+  type EntityJson, type EntityPayload, type LiteJson,
 } from "../src/core/entity.ts";
+import { parseLossless } from "../src/core/json.ts";
 import { SignumHttp } from "../src/core/http.ts";
 import { ValidationError } from "../src/core/errors.ts";
 
@@ -193,10 +194,34 @@ describe("edits actually save (STORY-32)", () => {
   });
 });
 
+describe("the payload is the only way out (AC-32.2)", () => {
+  it("serializing twice — a preview, then the send — produces the same payload", () => {
+    const e = fresh();
+    setMember(e, ["lines", 0, "details", "note"], "x");
+    expect(serializeEntity(e).json).toBe(serializeEntity(e).json);
+  });
+
+  it("a hand-built payload is refused at runtime, so propagation cannot be skipped by a cast", async () => {
+    const forged = { json: ORDER, modified: true } as unknown as EntityPayload;
+    const http = new SignumHttp({ baseUrl: "http://127.0.0.1:1", token: "test-token" });
+    await expect(validateEntity(http, forged)).rejects.toThrow(/not produced by serializeEntity/);
+  });
+
+  it("nothing in src/ outside entity.ts casts its way to an EntityPayload", async () => {
+    const offenders: string[] = [];
+    for await (const path of new Bun.Glob("src/**/*.ts").scan(".")) {
+      if (path === "src/core/entity.ts") continue;
+      if (/as\s+(unknown\s+as\s+)?EntityPayload\b/.test(await Bun.file(path).text())) offenders.push(path);
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe("against a server (mock): fetch, then validateEntity", () => {
   let server: ReturnType<typeof Bun.serve>;
   let received: string | undefined;
-  let reject = false;
+  /** The 400 body to answer with, or undefined to accept. */
+  let rejection: unknown;
 
   beforeAll(() => {
     server = Bun.serve({
@@ -208,9 +233,8 @@ describe("against a server (mock): fetch, then validateEntity", () => {
         }
         if (url.pathname === "/api/validateEntity" && req.method === "POST") {
           received = await req.text();
-          if (!reject) return new Response(null, { status: 200 });
-          // `BadRequestObjectResult(ModelState)` — keys are root-prefixed property routes.
-          return Response.json({ "entity.state": ["State is not set"] }, { status: 400 });
+          if (rejection === undefined) return new Response(null, { status: 200 });
+          return Response.json(rejection, { status: 400 });
         }
         return new Response("not found", { status: 404 });
       },
@@ -220,18 +244,30 @@ describe("against a server (mock): fetch, then validateEntity", () => {
 
   const http = () => new SignumHttp({ baseUrl: `http://127.0.0.1:${server.port}`, token: "test-token" });
 
+  const rejectedWith = async (body: unknown): Promise<unknown> => {
+    rejection = body;
+    const e = await fetchEntity(http(), "Order", "42");
+    setMember(e, ["state"], "");
+    return validateEntity(http(), serializeEntity(e)).catch((x: unknown) => x);
+  };
+
   it("posts the fetched entity back byte-identical", async () => {
-    reject = false;
+    rejection = undefined;
     const e = await fetchEntity(http(), "Order", "42");
     await validateEntity(http(), serializeEntity(e));
     expect(received).toBe(ORDER);
   });
 
-  it("reports the server's per-field messages unreworded as a validation error", async () => {
-    reject = true;
-    const e = await fetchEntity(http(), "Order", "42");
-    setMember(e, ["state"], "");
-    const err = await validateEntity(http(), serializeEntity(e)).catch((x: unknown) => x);
+  it("reports a bare ModelState's per-field messages unreworded (validateEntity)", async () => {
+    // `BadRequestObjectResult(ModelState)` — keys are root-prefixed property routes.
+    const err = await rejectedWith({ "entity.state": ["State is not set"] });
+    expect(err).toBeInstanceOf(ValidationError);
+    expect((err as Error).message).toContain("entity.state: State is not set");
+  });
+
+  it("reports ValidationProblemDetails' per-field messages too (the operation endpoints' shape)", async () => {
+    // `OperationController.cs:56-72` wraps the same map in `errors`, beside a generic title.
+    const err = await rejectedWith({ title: "Validation error", status: 400, errors: { "entity.state": ["State is not set"] } });
     expect(err).toBeInstanceOf(ValidationError);
     expect((err as Error).message).toContain("entity.state: State is not set");
   });
