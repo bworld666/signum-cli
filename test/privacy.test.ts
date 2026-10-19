@@ -15,6 +15,7 @@ import {
   resolvePolicy, surrogate,
 } from "../src/core/privacy.ts";
 import { UsageError } from "../src/core/errors.ts";
+import { JsonNumber, parseLossless } from "../src/core/json.ts";
 
 /** The old `classify(name, policy)` shape, kept for readability in these name-only cases. */
 const sensitivityOf = (name: string, policy: Parameters<typeof sensitivity>[1]) =>
@@ -306,6 +307,42 @@ describe("entity documents protect nested identities (the get leak)", () => {
     const fromDocument = (pseudonymizeDocument({ Customer: lite }, policy()).value as Record<string, unknown>)["Customer"];
     const fromValue = surrogate(lite, "Customer", policy());
     expect(fromDocument).toBe(fromValue);
+  });
+});
+
+/**
+ * `get` reads entities losslessly (#111), so ids arrive as `identifier` JsonNumbers, not numbers. The
+ * identity check used to be `typeof id === "number"` — under that, an exact id made a Lite invisible
+ * and it was emitted whole, real label included.
+ */
+describe("exact ids are still identities (lossless get)", () => {
+  const DOC = `{"Type":"Order","id":42,"Customer":{"EntityType":"Customer","id":7,"model":"Anna Müller"},"total":99.50}`;
+
+  it("pseudonymizes a lossless document exactly as the plain one — same handles, same output", () => {
+    const plain = pseudonymizeDocument(JSON.parse(DOC), policy());
+    const exact = pseudonymizeDocument(parseLossless(DOC), policy());
+    // Identical handles are what keep a `get` handle and a `query` handle for one record the same.
+    expect(exact.handles).toEqual(plain.handles);
+    expect(exact.pseudonymized).toEqual(plain.pseudonymized);
+    expect(JSON.stringify(exact.value)).toBe(JSON.stringify(plain.value).replace(`"total":99.5`, `"total":99.50`));
+    expect(JSON.stringify(exact.value)).not.toContain("Anna Müller");
+  });
+
+  it("records an int64 id past 2^53 exactly, so `unmask` resolves to the real record", () => {
+    const { handles } = pseudonymizeDocument(
+      parseLossless(`{"Customer":{"EntityType":"Customer","id":9007199254740993,"model":"A"}}`),
+      policy(),
+    );
+    expect(Object.values(handles)).toEqual(["Customer;9007199254740993"]);
+  });
+
+  it("only an id is an identity — a tagged plain number is a value", () => {
+    expect(isIdentityValue({ EntityType: "Customer", id: new JsonNumber("identifier", "7") })).toBe(true);
+    expect(isIdentityValue({ EntityType: "Customer", id: new JsonNumber("number", "7") })).toBe(false);
+  });
+
+  it("a sensitive exact number gets a numeric surrogate, like a plain one", () => {
+    expect(typeof surrogate(new JsonNumber("number", "4711"), "Salary", policy())).toBe("number");
   });
 });
 

@@ -20,6 +20,7 @@
 import type { ResolvedTable } from "./resulttable.ts";
 import { assertDataWriter, type DataWriter } from "./policy.ts";
 import { UsageError } from "./errors.ts";
+import { idText } from "./json.ts";
 
 export const OUTPUT_FORMATS = ["table", "json", "csv", "tsv", "ndjson", "name"] as const;
 export type OutputFormat = (typeof OUTPUT_FORMATS)[number];
@@ -112,10 +113,8 @@ function liteKey(entity: unknown): string | undefined {
   if (entity === null || typeof entity !== "object") return undefined;
   const e = entity as Record<string, unknown>;
   const type = e["EntityType"] ?? e["Type"];
-  const id = e["id"];
-  if (typeof type === "string" && (typeof id === "string" || typeof id === "number")) {
-    return `${type};${id}`;
-  }
+  const id = idText(e["id"]);
+  if (typeof type === "string" && id !== undefined) return `${type};${id}`;
   return undefined;
 }
 

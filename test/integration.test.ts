@@ -340,6 +340,14 @@ beforeAll(() => {
           { headers },
         );
       }
+      if (url.pathname === "/api/entity/Order/9007199254740993") {
+        // Written as text: JSON.stringify could not hold the id or the trailing zero (#111).
+        return new Response(
+          `{"Type":"Order","id":9007199254740993,"ticks":"638","toStr":"Order","modified":false,` +
+          `"total":1234567890.10,"customer":{"EntityType":"Customer","id":9007199254740995,"model":"Anna Müller"}}`,
+          { headers },
+        );
+      }
       if (url.pathname === "/api/entity/Order/999") {
         return new Response(JSON.stringify({ exceptionMessage: "not found" }), { status: 404, headers });
       }
@@ -1324,6 +1332,24 @@ describe("get (STORY-30)", () => {
     const r = await cli(["get", "Order", "42", "--json"]);
     expect(r.code).toBe(ExitCode.Ok);
     expect((JSON.parse(r.out) as { id: number }).id).toBe(42);
+  });
+
+  it("shows int64 ids and decimals exactly as the server sent them (#111)", async () => {
+    const r = await cli(["get", "Order", "9007199254740993", "--json"]);
+    expect(r.code).toBe(ExitCode.Ok);
+    // JSON.parse would print …992 — an id that names a different record — and 1234567890.1.
+    expect(r.out).toContain(`"id": 9007199254740993`);
+    expect(r.out).toContain(`"total": 1234567890.10`);
+    expect(r.out).toContain(`"id": 9007199254740995`);
+  });
+
+  it("still replaces an exact-id Lite with a handle for an agent caller (#111)", async () => {
+    const r = await cli(["get", "Order", "9007199254740993", "--json"], { env: { CLAUDECODE: "1" } });
+    expect(r.code).toBe(ExitCode.Ok);
+    expect(r.out).not.toContain("Anna Müller");
+    expect(r.out).not.toContain("9007199254740995");
+    expect(r.out).toContain(HANDLE_PREFIX);
+    expect(r.out).toContain(`"total": 1234567890.10`);
   });
 
   it("accepts a Lite key (AC-30.2)", async () => {

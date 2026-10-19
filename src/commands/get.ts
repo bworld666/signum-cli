@@ -16,7 +16,7 @@ import { loadHandles } from "../core/handles.ts";
 import { parseLiteKey } from "../core/text.ts";
 import { disclosure, pseudonymizeDocument } from "../core/privacy.ts";
 import { isHandle, resolveHandle } from "../core/reidentify.ts";
-import { entityPath, fetchEntityDocument } from "../core/entity.ts";
+import { entityPath, fetchEntity } from "../core/entity.ts";
 
 export async function runGet(ctx: Ctx): Promise<ExitCode> {
   const first = ctx.args.positionals[0];
@@ -114,7 +114,7 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
     return present ? ExitCode.Ok : ExitCode.NotFound;
   }
 
-  const body = await fetchEntityDocument(target.http, cleanName, id);
+  const body = await fetchEntity(target.http, cleanName, id);
 
   // An entity is a document, not a table, so it renders as JSON in every format — and it is
   // pseudonymized by member name rather than by column (REQ-057). Without this the m2 gate change

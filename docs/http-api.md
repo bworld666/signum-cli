@@ -333,7 +333,10 @@ implementation of all of this is `src/core/entity.ts`.
    (`TypeName;id`).
 7. **Numbers must not pass through a JS `number`.** `decimal` is a JSON number, and numeric ids are
    int64: `JSON.parse` rounds `0.10` to `0.1` and ids past 2^53 to a *different* id. Read entities
-   with the source text of every number preserved, and write it back verbatim.
+   with the source text of every number preserved, and write it back verbatim. The CLI wraps each
+   one in a `JsonNumber` (`src/core/json.ts`) tagged `identifier` under `id`, `rowId` and
+   `partitionId`, `number` elsewhere — privacy recognises a Lite by an `identifier` id, so the tag is
+   what keeps an exact id from slipping past pseudonymization.
 8. **Value formats:** DateOnly `"2024-01-31"`, TimeOnly `"HH:mm:ss.FFFFFFF"`, TimeSpan `"[d.]hh:mm:ss[.fffffff]"`
    (`DateOnlyConverter.cs`, `TimeOnlyConverter.cs`, `TimeSpanConverter.cs`); enums as their name
    (`SignumServer.cs:48`); DateTime ISO-8601 and `byte[]` base64 (System.Text.Json defaults).

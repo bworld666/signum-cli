@@ -21,10 +21,10 @@
 
 import { CliError, ExitCode, NotFoundError, UsageError } from "./errors.ts";
 import type { SignumHttp } from "./http.ts";
-import { isRawJson, type RawJson } from "./json.ts";
+import { JsonNumber } from "./json.ts";
 
-/** Numeric primary keys arrive as raw numbers, GUID and string keys as strings. */
-export type PrimaryKey = RawJson | string;
+/** Numeric primary keys arrive as `identifier` JsonNumbers, GUID and string keys as strings. */
+export type PrimaryKey = JsonNumber | string;
 
 /**
  * Any `ModifiableEntity`: a root entity, an embedded entity, a model or a mixin.
@@ -65,7 +65,7 @@ const SPECIAL = new Set(["Type", "id", "isNew", "partitionId", "ticks", "toStr",
 const READ_ONLY = new Set([...SPECIAL, "propsMeta", "mixins"]);
 
 function isObject(v: unknown): v is Record<string, unknown> {
-  return v !== null && typeof v === "object" && !Array.isArray(v) && !isRawJson(v);
+  return v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof JsonNumber);
 }
 
 function isEntity(v: unknown): v is EntityJson {
@@ -274,29 +274,17 @@ export function entityPath(cleanName: string, id: string): string {
   return `api/entity/${encodeURIComponent(cleanName)}/${encodeURIComponent(id)}`;
 }
 
-async function fetchEntityBody(http: SignumHttp, cleanName: string, id: string, lossless: boolean): Promise<unknown> {
-  const res = await http.request<unknown>({ method: "GET", path: entityPath(cleanName, id), lossless });
+/**
+ * `GET api/entity/{type}/{id}`, numbers kept exact, server invariants checked. Used both to edit
+ * and send back, and to display (`signum get`) — a reader shown a rounded id is shown a record that
+ * does not exist.
+ */
+export async function fetchEntity(http: SignumHttp, cleanName: string, id: string): Promise<EntityJson> {
+  const res = await http.request<unknown>({ method: "GET", path: entityPath(cleanName, id), lossless: true });
   if (res.body === null || res.body === undefined || res.body === "") {
     throw new NotFoundError(`${cleanName} ${id} not found`);
   }
-  return res.body;
-}
-
-/** Fetch an entity to edit and send back: numbers kept exact, server invariants checked. */
-export async function fetchEntity(http: SignumHttp, cleanName: string, id: string): Promise<EntityJson> {
-  return asEntity(await fetchEntityBody(http, cleanName, id, true));
-}
-
-/**
- * Fetch an entity to DISPLAY (`signum get`), with plain JS numbers.
- *
- * Not lossless, deliberately: the privacy walk recognises a Lite by a `number` or `string` id
- * (`privacy.ts` `liteKeyOf`), so a RawJson id would make an identity unrecognisable and emit it
- * unpseudonymized. Until privacy.ts handles RawJson, `get` shows int64 ids past 2^53 and decimals
- * the way `JSON.parse` reads them. Never send what this returns.
- */
-export async function fetchEntityDocument(http: SignumHttp, cleanName: string, id: string): Promise<unknown> {
-  return fetchEntityBody(http, cleanName, id, false);
+  return asEntity(res.body);
 }
 
 /**

@@ -25,6 +25,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configDir, writeSecret } from "./config.ts";
 import { UsageError } from "./errors.ts";
+import { JsonNumber, idText } from "./json.ts";
 
 export const PSEUDONYMIZE_MODES = ["off", "heuristic", "strict"] as const;
 export type PseudonymizeMode = (typeof PSEUDONYMIZE_MODES)[number];
@@ -296,7 +297,7 @@ export function surrogate(
     return handle;
   }
 
-  if (typeof value === "number") {
+  if (typeof value === "number" || value instanceof JsonNumber) {
     // Stable, positive, and numeric — so a csv column of numbers stays a column of numbers.
     return Number.parseInt(digest.slice(0, 8), 16);
   }
@@ -399,10 +400,10 @@ function liteKeyOf(value: unknown): string | undefined {
   if (value === null || typeof value !== "object") return undefined;
   const o = value as Record<string, unknown>;
   const type = o["EntityType"] ?? o["Type"];
-  const id = o["id"];
-  if (typeof type === "string" && (typeof id === "string" || typeof id === "number")) {
-    return `${type};${String(id)}`;
-  }
+  // idText, not a typeof check: an `identifier` JsonNumber (exact int64, from a lossless read) is an
+  // id too, and missing it here would emit the identity unpseudonymized.
+  const id = idText(o["id"]);
+  if (typeof type === "string" && id !== undefined) return `${type};${id}`;
   return undefined;
 }
 
@@ -424,6 +425,7 @@ export function isIdentityValue(value: unknown): boolean {
 
 /** Stable string form, so the same logical value always digests identically. */
 function canonical(value: unknown): string {
+  if (value instanceof JsonNumber) return value.text; // the same digest as the plain number
   if (typeof value === "object") {
     const o = value as Record<string, unknown>;
     // A Lite identifies by type+id; its label is incidental and may vary between queries.
@@ -619,7 +621,7 @@ export function pseudonymizeDocument(
 
   const walk = (node: unknown, path: string): unknown => {
     if (Array.isArray(node)) return node.map((n) => walk(n, path));
-    if (node === null || typeof node !== "object") return node;
+    if (node === null || typeof node !== "object" || node instanceof JsonNumber) return node;
 
     const out: Record<string, unknown> = {};
     for (const [key, v] of Object.entries(node as Record<string, unknown>)) {
