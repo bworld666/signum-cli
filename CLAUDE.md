@@ -5,9 +5,11 @@ See [`AGENTS.md`](AGENTS.md) for all shared agent context, hard rules, and conve
 Quick orientation:
 
 - **What this is:** a CLI that talks to running Signum Framework apps over HTTP.
-- **Status:** pre-implementation — currently collecting requirements
-  ([`docs/requirements.md`](docs/requirements.md), tracked as GitHub issues labelled
-  `requirement`).
+- **Status:** m1 (read-only core) implemented and released as pre-release `v0.1.0-b.*`; no writes
+  yet. Requirements: [`docs/requirements.md`](docs/requirements.md), tracked as GitHub issues
+  labelled `requirement`.
+- **Run it:** `npm ci` (installs the pinned Bun), then `./node_modules/.bin/bun src/cli.ts help` and
+  `./node_modules/.bin/bun test`.
 - **Decided:** **TypeScript + Bun**, compiled to a single executable
   ([ADR 0006](docs/decisions/0006-typescript-bun.md), superseding ADR 0005/0001). Measured: 91 MB,
   24 ms startup, five targets cross-compiled from one Linux host. The framework is a **reference to
@@ -15,7 +17,8 @@ Quick orientation:
 - **Privacy:** caller detection is **not** a security boundary, and m1 refuses to emit row data under a
   detected AI caller without an explicit flag
   ([ADR 0007](docs/decisions/0007-ai-caller-detection-and-pseudonymization.md)).
-- **Still open:** [ADR 0002](docs/decisions/0002-mcp-vs-http.md) — MCP relationship.
+- **MCP:** [ADR 0002](docs/decisions/0002-mcp-vs-http.md) is accepted — HTTP core, with the CLI
+  itself exposed as an MCP server (m3).
 - **Before writing request code:** read [`docs/http-api.md`](docs/http-api.md).
 - **The framework** is a sibling checkout at `../signum-framework` — read it, never modify it.
 

@@ -4,14 +4,49 @@ A command-line client for [Signum Framework](https://github.com/signumsoftware/f
 applications — run dynamic queries, retrieve and save entities, and execute operations
 against a running Signum app.
 
-> **Status: pre-implementation.** This repository currently contains the architecture
-> analysis and design groundwork. No CLI code exists yet — we are collecting requirements
-> (see [`docs/requirements.md`](docs/requirements.md) and the issues labelled
-> [`requirement`](https://github.com/pajoma/signum-cli/labels/requirement)).
+> **Status: pre-release, milestone `m1` (read-only core).** The CLI is implemented and published
+> as pre-release binaries (`v0.1.0-b.*`). It can discover, query and read; it cannot write yet —
+> saving entities and executing operations are milestone `m2`. Requirements live in
+> [`docs/requirements.md`](docs/requirements.md) and the issues labelled
+> [`requirement`](https://github.com/pajoma/signum-cli/labels/requirement).
 
-Planned shape: a **self-contained executable** — one file, no runtime to install — written in
+Shape: a **self-contained executable** — one file, no runtime to install — written in
 **TypeScript** and compiled with **Bun** ([ADR 0006](docs/decisions/0006-typescript-bun.md)).
 Measured: 91 MB, 24 ms startup, and all five release targets cross-compiled from one Linux host.
+
+## Usage
+
+```
+signum --url https://your-app types                  # explore, no login needed
+signum auth login --url https://your-app --with-token
+signum auth status                                   # who am I, against what
+signum queries                                       # what can I query?
+signum explain Order.Entity.Customer                 # walk the query-token schema
+signum query Order --filter 'Customer.Name ~ "Acme"' --json
+signum get Order 42
+signum help                                          # commands, topics, exit codes
+```
+
+| Command | Purpose |
+|---|---|
+| `auth login` / `status` / `logout` | Store, check or remove a credential for a target |
+| `types`, `queries`, `operations` | Discover what the application exposes |
+| `explain` | Describe a type, a query-token path, or an operation |
+| `query` | Run a dynamic query (filter syntax: `signum help filter`) |
+| `get` | Retrieve one entity by type and id, or by Lite key |
+| `unmask` | Resolve local `ref_` pseudonym handles back to the records they stand for |
+| `cache` | Inspect or clear cached application metadata |
+| `version` | CLI version, and the target's when reachable |
+
+Configuration is flags and environment variables only — `SIGNUM_URL`, `SIGNUM_TOKEN`,
+`SIGNUM_OFFLINE`, `SIGNUM_CONFIG_DIR`, `SIGNUM_CALLER_CONTEXT`, `SIGNUM_PSEUDONYMIZE`,
+`SIGNUM_ALLOW_AGENT_DATA`. Output is a table on a terminal and JSON when piped; override with `-o`.
+
+**Under an AI agent.** The CLI detects agent callers (e.g. `CLAUDECODE`, `AI_AGENT`) and then
+refuses to print row data unless pseudonymization is on or the data is explicitly acknowledged
+([ADR 0007](docs/decisions/0007-ai-caller-detection-and-pseudonymization.md),
+[ADR 0009](docs/decisions/0009-agent-mediated-privacy.md)). Detection only picks a stricter default;
+it is not a security boundary. See `signum help pseudonymization`.
 
 ## Why
 
@@ -30,33 +65,38 @@ engine with 223 scripts) and `Signum/CodeGeneration/` already own that.
 |---|---|
 | [`docs/architecture-overview.md`](docs/architecture-overview.md) | How the framework works — entity model, ORM, LINQ provider, operations, DynamicQuery, the 57 extension modules. Start here. |
 | [`docs/http-api.md`](docs/http-api.md) | The API contract this CLI is built against: auth, endpoints, serialization rules, QueryToken grammar. |
-| [`docs/requirements.md`](docs/requirements.md) | What the CLI must do — 48 requirements, mirrored as GitHub issues and triaged into milestones `m1`/`m2`/`m3`/`always`. |
-| [`docs/stories/`](docs/stories/) | 32 user stories with acceptance criteria (auth, query, entities, operations). |
+| [`docs/requirements.md`](docs/requirements.md) | What the CLI must do — 54 requirements, mirrored as GitHub issues and triaged into milestones `m1`/`m2`/`m3`/`always`. |
+| [`docs/stories/`](docs/stories/) | 40 user stories with acceptance criteria (auth, query, entities, operations, privacy, help). |
 | [`docs/design/`](docs/design/) | Design specs — the [CLI surface](docs/design/cli-surface.md) (command tree, flags, exit codes) and the [filter expression syntax](docs/design/filter-expression-syntax.md). |
 | [`docs/target-application.md`](docs/target-application.md) | The deployment this must work against, and what it rules out. |
-| [`docs/decisions/`](docs/decisions/) | ADRs: implementation language, self-contained distribution, and how to relate to the framework's built-in MCP server. |
+| [`docs/decisions/`](docs/decisions/) | ADRs: implementation language, self-contained distribution, the MCP relationship, Entra identity, privacy under AI callers, and browser token capture. |
+| [`src/`](src/), [`test/`](test/) | The CLI: `cli.ts` dispatches to `commands/`; shared logic (HTTP, auth tokens, filter parser, `ResultTable` de-interning, privacy gate) is in `core/`. |
 | [`docs/reference/`](docs/reference/) | ~9,800 lines of deep analysis across seven areas, every claim cited to `file:line`. |
 | [`AGENTS.md`](AGENTS.md) | Context and hard rules for coding agents. |
 
 Everything in `docs/` was derived by reading Signum Framework at commit `74bd24693d`
-(master, 2026-07). **None of it has been exercised against a live server yet** — treat it as
-carefully-sourced hypothesis, and see the verification note at the end of `docs/http-api.md`.
+(master, 2026-07). **None of it has been exercised against a live server yet** — the CLI's tests run
+against mocked responses. Treat the docs as carefully-sourced hypothesis, and see the verification
+note at the end of `docs/http-api.md` and the
+[live verification runbook](docs/reference/live-verification-runbook.md).
 
 ## Decisions
 
 **Settled.** [TypeScript + Bun single executable](docs/decisions/0006-typescript-bun.md).
 The API is generic, so the client must be metadata-driven and no framework code is reusable in *any*
 language — which left the earlier C# choice resting on audience alone
-([ADR 0001](docs/decisions/0001-implementation-language.md), now superseded). Rust was chosen while
-reversal was still free, partly because the two highest-stakes correctness risks — `ResultTable`
-de-interning and `modified` propagation, both of which fail *silently* — can be made unrepresentable
-in the type system rather than merely tested.
+([ADR 0001](docs/decisions/0001-implementation-language.md), now superseded). Rust
+([ADR 0005](docs/decisions/0005-rust-implementation.md)) came next and was superseded by measurements.
+The price of leaving it: the two silent-failure risks — `ResultTable` de-interning and `modified`
+propagation — are guarded by release-blocking tests rather than by the type system.
 [Distribution mechanics](docs/decisions/0003-self-contained-distribution.md) cover the release story.
 
-**Open.** [MCP relationship](docs/decisions/0002-mcp-vs-http.md) — `Extensions/Signum.Agent`
-already ships a real MCP server whose skills overlap this CLI's scope. Recommendation: build
-the deterministic HTTP client first and depend on nothing server-side, then consider exposing
-*this* CLI as an MCP server so agents can drive any Signum app.
+**Settled.** [MCP relationship](docs/decisions/0002-mcp-vs-http.md) — a deterministic HTTP core that
+depends on nothing server-side, with the CLI itself exposed as an MCP server (milestone `m3`).
+Privacy for agent callers ([ADR 0007](docs/decisions/0007-ai-caller-detection-and-pseudonymization.md),
+[ADR 0009](docs/decisions/0009-agent-mediated-privacy.md)) and
+[browser-driven token capture](docs/decisions/0008-browser-driven-token-capture.md) have their own
+ADRs.
 
 ## Two things to know before writing any request code
 
@@ -75,10 +115,11 @@ git/sfcl/
 └── signum-cli/         ← this repo
 ```
 
-Common commands (Bun):
+Common commands (Bun). Bun is also a pinned devDependency: if it is not on your `PATH`, `npm ci`
+installs it and `npx bun …` runs it.
 
 ```
-bun install
+bun install            # or: npm ci
 bun run check          # typecheck + tests (the CI gate)
 bun run build          # single binary for this host → dist/signum
 bun run build:all      # all platform binaries + SHA256SUMS → dist/
@@ -105,19 +146,12 @@ To cut a release: bump `version` in `package.json`, commit, then tag `v<that-ver
 the tag. The pipeline refuses a tag that doesn't match `package.json`, a PEP 440 tag
 (`0.1.0b1`), or a channel mismatch (a pre-release tag on `main`, or vice versa).
 
-**First running client (after this PR merges to `develop`):**
+**Installing a pre-release:** download the binary for your platform from the
+[releases page](https://github.com/pajoma/signum-cli/releases), check it against `SHA256SUMS`, then:
 
 ```
-git switch develop && git pull
-git tag v0.1.0-b.1 && git push origin v0.1.0-b.1
-```
-
-That fires the pre-release pipeline and produces downloadable binaries. Then:
-
-```
-curl -LO <release-asset-url>/signum-0.1.0-b.1-linux-x64
-chmod +x signum-0.1.0-b.1-linux-x64
-./signum-0.1.0-b.1-linux-x64 --url https://your-app types   # explore without logging in
+chmod +x signum-<version>-linux-x64
+./signum-<version>-linux-x64 --url https://your-app types   # explore without logging in
 ```
 
 > **Maintainer setup (one-time):** require the `check` status on `develop` and `main` in branch

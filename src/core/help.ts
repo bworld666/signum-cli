@@ -35,7 +35,7 @@ export const GLOBAL_FLAGS: FlagSpec[] = [
   { name: "url", arg: "<url>", summary: "Target application base URL (or SIGNUM_URL)" },
   { name: "output", alias: "o", arg: "<fmt>", summary: `Output format: ${OUTPUT_FORMATS.join(", ")}` },
   { name: "json", summary: "Alias for --output json" },
-  { name: "explain", summary: "Print the request that would be sent; send nothing" },
+  { name: "explain", summary: "Print the request instead of sending it (metadata may be fetched)" },
   { name: "verbose", alias: "v", summary: "HTTP tracing, credentials redacted" },
   { name: "no-color", summary: "Disable colour (also honours NO_COLOR)" },
   { name: "timeout", arg: "<seconds>", summary: "Request timeout" },

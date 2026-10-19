@@ -218,7 +218,7 @@ them to reimplement knowledge that already exists. One structured source, many r
 | `--url <url>` | **m1** | Target directly, bypassing contexts. m1 has no context store yet. |
 | `-o, --output <fmt>` | **m1** | `table`, `json`, `csv`, `tsv`, `ndjson`, `name`. |
 | `--json` | **m1** | Alias for `-o json`, for `gh` muscle memory. |
-| `--explain` | **m1** | Print the request that *would* be sent; send nothing. |
+| `--explain` | **m1** | Print the request that *would* be sent instead of sending it. Read-only metadata lookups (type and query descriptions) still go out, from the cache when possible; `--offline` forbids them. |
 | `--dry-run=client\|server` | m2 | `client` ≡ `--explain`. `server` checks `canExecute` (REQ-043). |
 | `-f, --filename <path\|->` | m2 | Input from file or stdin. `@file` also accepted. |
 | `-y, --yes` | m2 | Skip confirmation. Required for mutations without a TTY. |
