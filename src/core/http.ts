@@ -17,6 +17,7 @@ import {
   TransportError, ValidationError, CliError, ExitCode,
 } from "./errors.ts";
 import { rotateCredential } from "./credentials.ts";
+import { parseLossless } from "./entity.ts";
 
 export const REDACTED = "<redacted>";
 
@@ -36,6 +37,10 @@ export interface RequestSpec {
   path: string;
   query?: Record<string, string | number | undefined>;
   body?: unknown;
+  /** Already-serialized JSON, sent verbatim — for payloads whose exact bytes matter (entity.ts). */
+  rawBody?: string;
+  /** Parse the response keeping every number's source text (entity.ts `parseLossless`). */
+  lossless?: boolean;
   /** Extra request headers; values are redacted in traces if they look like credentials. */
   headers?: Record<string, string>;
   /** Sent even when no token is stored — used for anonymous endpoints. */
@@ -94,6 +99,24 @@ function errorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
+/**
+ * Per-field messages from a 400. `ValidateModelFilter` answers with the bare ModelState
+ * (`ValidateModelFilterAttribute.cs:25`), operations with `ValidationProblemDetails`, whose
+ * `errors` holds the same map (`OperationController.cs:56-72`). Messages pass through unreworded
+ * (AC-34.4).
+ */
+function fieldErrors(body: unknown): string[] {
+  if (body === null || typeof body !== "object") return [];
+  const b = body as Record<string, unknown>;
+  const map = b["errors"] !== null && typeof b["errors"] === "object" ? b["errors"] as Record<string, unknown> : b;
+  const lines: string[] = [];
+  for (const [key, messages] of Object.entries(map)) {
+    if (!Array.isArray(messages)) continue;
+    for (const m of messages) if (typeof m === "string") lines.push(`  ${key === "" ? "(entity)" : key}: ${m}`);
+  }
+  return lines;
+}
+
 export class SignumHttp {
   constructor(private readonly opts: HttpOptions) {}
 
@@ -126,7 +149,8 @@ export class SignumHttp {
       });
     }
 
-    if (spec.body !== undefined) headers["content-type"] = "application/json";
+    const payload = spec.rawBody ?? (spec.body !== undefined ? JSON.stringify(spec.body) : undefined);
+    if (payload !== undefined) headers["content-type"] = "application/json";
     if (spec.ifModifiedSince !== undefined) headers["if-modified-since"] = spec.ifModifiedSince;
 
     this.opts.trace?.(`> ${spec.method} ${url}\n`);
@@ -146,7 +170,7 @@ export class SignumHttp {
         method: spec.method,
         headers,
         signal: controller.signal,
-        ...(spec.body !== undefined ? { body: JSON.stringify(spec.body) } : {}),
+        ...(payload !== undefined ? { body: payload } : {}),
       });
     } catch (err) {
       const aborted = err instanceof Error && err.name === "AbortError";
@@ -189,7 +213,7 @@ export class SignumHttp {
     const contentType = res.headers.get("content-type") ?? "";
     if (text !== "" && (contentType.includes("json") || text.startsWith("{") || text.startsWith("["))) {
       try {
-        body = JSON.parse(text);
+        body = spec.lossless === true ? parseLossless(text) : JSON.parse(text);
       } catch {
         body = text;
       }
@@ -237,7 +261,10 @@ export class SignumHttp {
     }
 
     if (status === 400) {
-      return new ValidationError(message, { hint: "The server rejected the request payload." });
+      const fields = fieldErrors(body);
+      return new ValidationError(fields.length > 0 ? `validation failed:\n${fields.join("\n")}` : message, {
+        hint: "The server rejected the request payload.",
+      });
     }
 
     if (status >= 500) {
