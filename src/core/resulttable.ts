@@ -22,6 +22,7 @@
 import { CliError, ExitCode } from "./errors.ts";
 import { createRecorder, sensitivity, surrogate, type PrivacyPolicy } from "./privacy.ts";
 import { ENTITY_TOKEN } from "./tokens.ts";
+import { JsonNumber } from "./json.ts";
 
 /** Raw wire shape of `ResultTable`, exactly as the server sends it. */
 export interface RawResultTable {
@@ -142,6 +143,18 @@ function entityPosition(serverColumns: readonly string[], requested: readonly st
 }
 
 /**
+ * An intern index as a plain integer, or undefined when `cell` is not one.
+ *
+ * Query results are read losslessly (#111), so an index arrives as a JsonNumber. Indices are
+ * positions in a pool, far below 2^53, so converting one to a `number` loses nothing — unlike
+ * the VALUES in the pool, which stay exact.
+ */
+function internIndex(cell: unknown): number | undefined {
+  const n = cell instanceof JsonNumber ? Number(cell.text) : cell;
+  return typeof n === "number" && Number.isSafeInteger(n) ? n : undefined;
+}
+
+/**
  * De-intern a raw `ResultTable` and restore its declared column shape.
  *
  * @throws CliError when an interned index is out of range — never silently null (AC-21.4).
@@ -192,21 +205,22 @@ export function resolveResultTable(raw: RawResultTable, options: ResolveOptions 
       // A column is interned only when the server supplied a pool for that token.
       if (pool !== undefined) {
         if (cell === null || cell === undefined) return null;
-        if (typeof cell !== "number" || !Number.isInteger(cell)) {
+        const index = internIndex(cell);
+        if (index === undefined) {
           throw new CliError(
             `row ${rowIndex}, column '${token}': expected an intern index but got ${typeof cell}`,
             ExitCode.Unexpected,
             { hint: "The server's ResultTable shape is not what this version of signum expects." },
           );
         }
-        if (cell < 0 || cell >= pool.length) {
+        if (index < 0 || index >= pool.length) {
           throw new CliError(
-            `row ${rowIndex}, column '${token}': intern index ${cell} is out of range (pool has ${pool.length})`,
+            `row ${rowIndex}, column '${token}': intern index ${index} is out of range (pool has ${pool.length})`,
             ExitCode.Unexpected,
             { hint: "This indicates a corrupt or unexpected response; the value is NOT being rendered as blank." },
           );
         }
-        return pool[cell] ?? null;
+        return pool[index] ?? null;
       }
 
       return cell ?? null;

@@ -15,7 +15,7 @@ import {
   type EntityJson, type EntityPayload, type LiteJson,
 } from "../src/core/entity.ts";
 import { parseLossless } from "../src/core/json.ts";
-import { SignumHttp } from "../src/core/http.ts";
+import { SignumHttp, type RequestSpec } from "../src/core/http.ts";
 import { ValidationError } from "../src/core/errors.ts";
 
 /**
@@ -250,6 +250,12 @@ describe("against a server (mock): fetch, then validateEntity", () => {
     setMember(e, ["state"], "");
     return validateEntity(http(), serializeEntity(e)).catch((x: unknown) => x);
   };
+
+  it("a request cannot carry both a body and a raw body — one would silently win", () => {
+    // @ts-expect-error — body and rawBody are mutually exclusive
+    const spec: RequestSpec = { method: "POST", path: "api/validateEntity", body: {}, rawBody: "{}" };
+    expect(spec.path).toBe("api/validateEntity");
+  });
 
   it("posts the fetched entity back byte-identical", async () => {
     rejection = undefined;

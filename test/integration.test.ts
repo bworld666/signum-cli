@@ -194,6 +194,18 @@ const RESULT_TABLE = {
   totalElements: 7,
 };
 
+/**
+ * A table JSON.parse cannot hold: int64 ids past 2^53 and a decimal with a trailing zero (#111).
+ * Written as text for that reason. The Customer is the same record the
+ * `/api/entity/Order/9007199254740993` fixture references, so handles can be compared across paths.
+ */
+const EXACT_RESULT_TABLE =
+  `{"columns":["State","Total","Customer"],"uniqueValues":{"State":["Shipped"]},"rows":[` +
+  `{"entity":{"EntityType":"Order","id":9007199254740993},"columns":[0,1234567890.10,` +
+  `{"EntityType":"Customer","id":9007199254740995,"model":"Anna Müller"}]}],"totalElements":1}`;
+/** When set, every executeQuery answers with EXACT_RESULT_TABLE. */
+let exactResultTable = false;
+
 beforeAll(() => {
   configDir = mkdtempSync(join(tmpdir(), "signum-test-"));
   server = Bun.serve({
@@ -323,6 +335,9 @@ beforeAll(() => {
       }
       if (url.pathname.startsWith("/api/query/description/")) {
         return new Response(JSON.stringify(QUERY_DESCRIPTION), { headers });
+      }
+      if (url.pathname.startsWith("/api/query/executeQuery/") && exactResultTable) {
+        return new Response(EXACT_RESULT_TABLE, { headers });
       }
       if (url.pathname.startsWith("/api/query/executeQuery/")) {
         executeQueryRequests.push(
@@ -864,6 +879,39 @@ describe("query (STORY-20, STORY-21, STORY-22)", () => {
     expect(rows[0]?.["State"]).toBe("Shipped");
     expect(rows[1]?.["State"]).toBe("Delivered");
     expect(rows[0]?.["Total"]).toBe(1200.5);
+  });
+
+  describe("exact numbers (#111)", () => {
+    beforeAll(() => { exactResultTable = true; });
+    afterAll(() => { exactResultTable = false; });
+
+    it("prints int64 ids and decimals exactly, in structured and flat formats", async () => {
+      const json = await cli(["query", "Order", "--json"]);
+      expect(json.code).toBe(ExitCode.Ok);
+      expect(json.out).toContain("9007199254740993");
+      expect(json.out).toContain("1234567890.10");
+      expect(json.out).not.toContain("9007199254740992"); // what JSON.parse would have printed
+
+      const csv = await cli(["query", "Order", "-o", "csv"]);
+      expect(csv.out).toContain("1234567890.10");
+
+      const names = await cli(["query", "Order", "-o", "name"]);
+      expect(names.out).toBe("Order;9007199254740993\n");
+    });
+
+    it("gives a record the same handle in query and get, so an agent can act on either", async () => {
+      const agent = { env: { CLAUDECODE: "1" } };
+      const q = await cli(["query", "Order", "--json"], agent);
+      const g = await cli(["get", "Order", "9007199254740993", "--json"], agent);
+      expect([q.code, g.code]).toEqual([ExitCode.Ok, ExitCode.Ok]);
+
+      const handle = (JSON.parse(q.out) as Array<Record<string, string>>)[0]?.["Customer"] as string;
+      expect(handle).toStartWith(HANDLE_PREFIX);
+      expect(q.out).not.toContain("Anna Müller");
+      expect(g.out).toContain(`"${handle}"`);
+      // The store maps the handle to the EXACT record, so unmask resolves to the right one.
+      expect(loadHandles({ SIGNUM_CONFIG_DIR: configDir } as NodeJS.ProcessEnv)[handle]).toBe("Customer;9007199254740995");
+    });
   });
 
   it("emits Lite keys for -o name", async () => {

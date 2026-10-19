@@ -185,6 +185,17 @@ describe("the data-output boundary cannot be bypassed inside src/", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("data commands read server data with exact numbers (#111)", async () => {
+    // A rounded int64 id names a different record, and its handle would not match the one the
+    // other data path mints for the same record. Every request in query.ts renders data; get.ts
+    // reads its entity through fetchEntity, which is lossless.
+    const query = await Bun.file("src/commands/query.ts").text();
+    const requests = query.match(/http\.request\b/g)?.length ?? 0;
+    expect(requests).toBeGreaterThan(0);
+    expect(query.match(/lossless: true/g)?.length ?? 0).toBe(requests);
+    expect(await Bun.file("src/commands/get.ts").text()).toContain("fetchEntity(");
+  });
+
   it("data commands write server data only through ctx.openData, never ctx.io.out", async () => {
     // query.ts and get.ts are the m1 data commands. They may still use ctx.io.err for
     // diagnostics and renderDocument+ctx.io.out for `--explain` (which sends nothing), so this

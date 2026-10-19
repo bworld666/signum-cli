@@ -32,21 +32,24 @@ export interface HttpOptions {
   env?: NodeJS.ProcessEnv;
 }
 
-export interface RequestSpec {
+/**
+ * A request body: a value to serialize, or JSON already serialized and sent verbatim — for payloads
+ * whose exact bytes matter (entity.ts). Never both; a type error rather than one silently winning.
+ */
+type RequestBody = { body?: unknown; rawBody?: never } | { rawBody: string; body?: never };
+
+export type RequestSpec = RequestBody & {
   method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
   query?: Record<string, string | number | undefined>;
-  body?: unknown;
-  /** Already-serialized JSON, sent verbatim — for payloads whose exact bytes matter (entity.ts). */
-  rawBody?: string;
-  /** Parse the response keeping every number's source text (entity.ts `parseLossless`). */
+  /** Parse the response keeping every number exact (json.ts `parseLossless`). */
   lossless?: boolean;
   /** Extra request headers; values are redacted in traces if they look like credentials. */
   headers?: Record<string, string>;
   /** Sent even when no token is stored — used for anonymous endpoints. */
   allowAnonymous?: boolean;
   ifModifiedSince?: string | undefined;
-}
+};
 
 export interface HttpResponse<T = unknown> {
   status: number;

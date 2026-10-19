@@ -333,7 +333,10 @@ implementation of all of this is `src/core/entity.ts`.
    (`TypeName;id`).
 7. **Numbers must not pass through a JS `number`.** `decimal` is a JSON number, and numeric ids are
    int64: `JSON.parse` rounds `0.10` to `0.1` and ids past 2^53 to a *different* id. Read entities
-   with the source text of every number preserved, and write it back verbatim. The CLI wraps each
+   and query results (`executeQuery`, `queryValue`) with the source text of every number preserved,
+   and write it back verbatim — if the two data paths disagreed, one record would get two different
+   ids and two different privacy handles. Metadata responses carry no data and are read plainly.
+   `ResultTable` intern indices are positions, so they are safe as plain numbers. The CLI wraps each
    one in a `JsonNumber` (`src/core/json.ts`) tagged `identifier` under `id`, `rowId` and
    `partitionId`, `number` elsewhere — privacy recognises a Lite by an `identifier` id, so the tag is
    what keeps an exact id from slipping past pseudonymization.
