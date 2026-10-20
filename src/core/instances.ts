@@ -56,20 +56,6 @@ export function listInstances(env?: NodeJS.ProcessEnv): Instance[] {
     .sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
-/** The URL's first host label, e.g. `https://renew.example.org/home` → `renew`. */
-export function slugFromUrl(url: string): string | undefined {
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    return undefined;
-  }
-  // An IP address has no meaningful first label; `127` names nothing.
-  if (/^[\d.]+$/.test(host) || host.includes(":")) return undefined;
-  const first = host.split(".")[0] ?? "";
-  return SLUG.test(first) ? first : undefined;
-}
-
 export function validateSlug(slug: string): string {
   const s = slug.toLowerCase();
   if (!SLUG.test(s)) {
@@ -130,7 +116,7 @@ export function resolveInstance(slug: string, env?: NodeJS.ProcessEnv): string {
   const near = nearest(slug.toLowerCase(), all.map((i) => i.slug));
   throw new UsageError(`unknown instance '${slug}'`, {
     hint: all.length === 0
-      ? "No instances are registered. Add one with `signum instance add <url> [name]`."
+      ? "No instances are registered. Add one with `signum instance add <name> <url>`."
       : (near !== undefined ? `Did you mean '${near}'? ` : "") +
         `Registered: ${all.map((i) => i.slug).join(", ")}. See \`signum instance list\`.`,
   });

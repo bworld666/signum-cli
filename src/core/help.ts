@@ -313,23 +313,23 @@ export const COMMANDS: CommandSpec[] = [
     usage: "signum instance <add|list|remove|path>",
     milestone: "m2",
     description:
-      "A registered name stands in for --url anywhere: `signum -i renew types`. The name defaults " +
-      "to the URL's first host label (https://renew.example.org/home → renew).\n\n" +
+      "A registered name stands in for --url anywhere: `signum -i renew types`. The name is always " +
+      "yours to choose; it is never derived from the URL.\n\n" +
       "Names are stored in instances.json in the config directory, owner-only. A stored login " +
       "is still matched by URL, so -i reaches it exactly when --url with the same address would. " +
       "Nothing here touches the network.",
     examples: [
-      "signum instance add https://renew.example.org/home",
-      "signum instance add https://app.example.org staging",
+      "signum instance add renew https://renew.example.org",
+      "signum instance add staging https://staging.example.org",
       "signum instance list",
     ],
     subcommands: [
       {
         name: "add",
-        summary: "Register a URL under a name (default: its first host label)",
-        usage: "signum instance add <url> [name]",
+        summary: "Register a URL under a name you choose",
+        usage: "signum instance add <name> <url>",
         milestone: "m2",
-        examples: ["signum instance add https://renew.example.org/home", "signum instance add http://localhost:5000 local"],
+        examples: ["signum instance add renew https://renew.example.org", "signum instance add local http://localhost:5000"],
       },
       {
         name: "list",

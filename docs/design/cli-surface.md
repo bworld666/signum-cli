@@ -132,7 +132,7 @@ signum ship order --help          # same, reached the way you would expect
 |---|---|---|
 | `signum auth login` · `logout` · `status` | **m1** | Credentials. `status` is the first thing to run when something breaks. |
 | `signum auth token` | m2 | Print the stored token (guarded; see §7). |
-| `signum instance add` · `list` · `remove` · `path` | **m2, implemented** | Target selection by name: `instance add <url> [name]` registers a URL (name defaults to its first host label), `-i <name>` targets it. Replaces the planned `config get-contexts`/`use-context`/`set-context`/`current-context`; there is no current-instance state yet (see §3). |
+| `signum instance add` · `list` · `remove` · `path` | **m2, implemented** | Target selection by name: `instance add <name> <url>` registers a URL under a name the user chooses (never derived from the URL — a guessed name is the one `-i` would later send commands to), `-i <name>` targets it. Replaces the planned `config get-contexts`/`use-context`/`set-context`/`current-context`; there is no current-instance state yet (see §3). |
 | `signum mcp` | m3 | Serve the command set over MCP on stdio. |
 | `signum unmask <ref…>` | m2 | Human-only resolution of `ref_` handles (AC-53.4). Refused under an agent context. |
 | `signum auth key create` · `show` | m3 | API-key provisioning. Not applicable to the target app — no `Signum.Rest` ([target profile](../target-application.md)). |
