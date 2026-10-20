@@ -13,7 +13,7 @@ import {
   defaultCredentialUrl, deleteAllCredentials, deleteCredential, loadCredential, permissionsAreUnenforceable, saveCredential,
   storedCredentialUrls,
 } from "../core/credentials.ts";
-import { SignumHttp } from "../core/http.ts";
+import { appVersionFrom, SignumHttp } from "../core/http.ts";
 import { flag } from "../core/ctx.ts";
 import { resolveTarget } from "../core/target.ts";
 import { handoffInstructions } from "../core/handoff.ts";
@@ -227,6 +227,9 @@ async function status(ctx: Ctx): Promise<ExitCode> {
     callerContext: ctx.caller.context,
     callerSignals: ctx.caller.signals,
     reachable: null as boolean | null,
+    // From the response headers (REQ-007): what is deployed, so a report can name it.
+    appVersion: null as string | null,
+    appBuildTime: null as string | null,
     detail: null as string | null,
   };
 
@@ -268,6 +271,9 @@ async function status(ctx: Ctx): Promise<ExitCode> {
     report.authenticated = name !== undefined;
     report.user = name ?? null;
     report.reachable = true;
+    const app = appVersionFrom(res.headers);
+    report.appVersion = app.version ?? null;
+    report.appBuildTime = app.buildTime ?? null;
   } catch (err) {
     // Only a TRANSPORT failure means the target is unreachable. A 403 proves the opposite: the
     // server answered. Reporting `reachable: false` next to "not authenticated: No authentication
@@ -295,6 +301,9 @@ async function status(ctx: Ctx): Promise<ExitCode> {
           ? `Identity      anonymous — the stored token is not being accepted\n`
           : `Identity      unknown (${report.detail})\n`,
     );
+    if (report.appVersion !== null) {
+      ctx.io.out(`App version   ${report.appVersion}${report.appBuildTime !== null ? ` (built ${report.appBuildTime})` : ""}\n`);
+    }
     ctx.io.out(`Caller        ${ctx.caller.context}\n`);
     if (ctx.args.flags.verbose) {
       for (const s of ctx.caller.signals) ctx.io.out(`              · ${s}\n`);
@@ -347,13 +356,14 @@ export async function runAuth(ctx: Ctx): Promise<ExitCode> {
   const sub = ctx.args.positionals[0]?.toLowerCase();
   switch (sub) {
     case "login":  return await login(ctx);
-    case "status": return await status(ctx);
+    case "status":
+    case "whoami": return await status(ctx); // REQ-007 names both
     case "logout": return logout(ctx);
     case undefined:
       throw new UsageError("`auth` needs a subcommand", { hint: "Run `signum auth --help`." });
     default:
       throw new UsageError(`unknown auth subcommand '${sub}'`, {
-        hint: "Valid subcommands: login, status, logout.",
+        hint: "Valid subcommands: login, status, logout, whoami (same as status).",
       });
   }
 }

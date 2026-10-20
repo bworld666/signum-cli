@@ -37,13 +37,16 @@ let anonymousUserConfigured = false;
 
 const REFLECTION = {
   Order: {
-    kind: "Main",
+    kind: "Entity", entityKind: "Main",
     niceName: "Order",
     queryDefined: true,
     members: {
       Id: { type: { name: "number" }, niceName: "Id" },
-      State: { type: { name: "string" }, niceName: "State" },
+      // Enum-typed, as on a real app: reflection lists OrderState as kind Enum, and an enum value
+      // is not an identity even though a type of that name exists.
+      State: { type: { name: "OrderState" }, niceName: "State" },
       Total: { type: { name: "decimal" }, niceName: "Total" },
+      Owner: { type: { name: "UserEntity" }, niceName: "Owner" },
     },
     operations: {
       "OrderOperation.Ship": { niceName: "Ship" },
@@ -51,7 +54,7 @@ const REFLECTION = {
     },
   },
   UserEntity: {
-    kind: "Main",
+    kind: "Entity", entityKind: "Main",
     niceName: "User",
     queryDefined: true,
     members: {
@@ -64,16 +67,25 @@ const REFLECTION = {
     },
     operations: { "UserOperation.Save": { niceName: "Save" } },
   },
+  // The non-entity kinds reflection lists beside entities (KindOfType, ReflectionServer.cs:629-636).
+  OrderState: {
+    kind: "Enum", niceName: "Order state",
+    members: { Shipped: { niceName: "Shipped" }, Delivered: { niceName: "Delivered" } },
+  },
+  BasicPermission: {
+    kind: "SymbolContainer", niceName: "Basic permission",
+    members: { AdminRules: { niceName: "Admin rules", id: 7 } },
+  },
   // Exist purely so their query keys pass the metadata-validation step before hitting the
   // 400/500 fixture routes above.
-  BadInput: { kind: "Main", queryDefined: true, members: {}, operations: {} },
-  Broken: { kind: "Main", queryDefined: true, members: {}, operations: {} },
+  BadInput: { kind: "Entity", entityKind: "Main", queryDefined: true, members: {}, operations: {} },
+  Broken: { kind: "Entity", entityKind: "Main", queryDefined: true, members: {}, operations: {} },
   // A reflected type with NO query. `queryDefined` is omitted rather than set to false because
   // that is what the wire looks like: TypeInfoTS.QueryDefined carries
   // [JsonIgnore(WhenWritingDefault)] (ReflectionServer.cs:474), so false is simply absent.
   // `signum queries` must not offer it, and `signum query` must not accept it — those two used
   // to disagree.
-  Ledger: { kind: "Main", niceName: "Ledger", members: { Id: { type: { name: "number" } } }, operations: {} },
+  Ledger: { kind: "Entity", entityKind: "Main", niceName: "Ledger", members: { Id: { type: { name: "number" } } }, operations: {} },
 };
 
 /**
@@ -216,7 +228,10 @@ beforeAll(() => {
       const auth = req.headers.get("authorization");
       const token = auth?.replace(/^Bearer /, "");
 
-      const headers: Record<string, string> = { "content-type": "application/json" };
+      // VersionFilterAttribute is a default MVC filter (SignumServer.cs:70): every action answers with these.
+      const headers: Record<string, string> = {
+        "content-type": "application/json", "x-app-version": "4.2.0.0", "x-app-buildtime": "2026-10-01T08:00:00.0000000Z",
+      };
       if (rotateNext && token === GOOD_TOKEN) {
         headers["New_Token"] = ROTATED_TOKEN; // AuthTokensServer.cs:85-94
         rotateNext = false;
@@ -445,7 +460,7 @@ describe("discovery without credentials (STORY-24, STORY-61)", () => {
     const r = await cli(["types", "--url", baseUrl, "--json"]);
     expect(r.code).toBe(ExitCode.Ok);
     const types = JSON.parse(r.out) as Array<{ name: string }>;
-    expect(types.map((t) => t.name).sort()).toEqual(["BadInput", "Broken", "Ledger", "Order", "UserEntity"]);
+    expect(types.map((t) => t.name).sort()).toEqual(["BadInput", "BasicPermission", "Broken", "Ledger", "Order", "OrderState", "UserEntity"]);
   });
 
   it("explains a type from metadata", async () => {
@@ -453,7 +468,7 @@ describe("discovery without credentials (STORY-24, STORY-61)", () => {
     expect(r.code).toBe(ExitCode.Ok);
     const doc = JSON.parse(r.out) as { name: string; members: unknown[] };
     expect(doc.name).toBe("Order");
-    expect(doc.members.length).toBe(3);
+    expect(doc.members.length).toBe(4);
   });
 
   it("flags an operation verb shadowed by a built-in (AC-41.8)", async () => {
@@ -1923,7 +1938,8 @@ describe("ref: handles, end to end (REQ-058)", () => {
       const g = await cli(["get", handle, "--json"], agent(d));
       expect(g.code).toBe(ExitCode.Ok);
       expect((JSON.parse(g.out) as Record<string, unknown>)["id"]).toBe(handle);
-      expect(g.out).not.toContain("42");
+      // Not a bare "42" check: the handle is random hex and may contain those digits.
+      expect(g.out).not.toMatch(/"id":\s*42\b|Order;42/);
       rmSync(d, { recursive: true, force: true });
     });
 
@@ -2046,6 +2062,10 @@ describe("explain --privacy agrees with what the query actually does (AC-52.11)"
     };
     const state = doc.members.find((m) => m.member === "State");
     expect(state).toMatchObject({ pseudonymize: false, reason: "not-sensitive" });
+    // Owner references an entity, so it IS an identity; State's type is an enum, so it is not —
+    // treating any known type name as an entity made every enum column an identity.
+    const owner = doc.members.find((m) => m.member === "Owner");
+    expect(owner).toMatchObject({ pseudonymize: true });
   });
 
   it("says nothing is hidden when the mode is off", async () => {
@@ -2378,6 +2398,51 @@ describe("named instances (REQ-001)", () => {
     expect((await cli(["instance", "remove", "local"], { env })).code).toBe(ExitCode.NotFound);
     expect(existsSync(join(d, "credential.json"))).toBe(true);
     rmSync(d, { recursive: true, force: true });
+  });
+});
+
+/** Discovery beyond entities (REQ-011) and the identity check's app version (REQ-007). */
+describe("enums, symbols and the app version (REQ-011, REQ-007)", () => {
+  it("lists types by kind, keeping KindOfType and the entity kind apart", async () => {
+    const all = JSON.parse((await cli(["types", "--url", baseUrl, "--json"])).out) as Array<{ name: string; kind: string; entityKind: string | null }>;
+    expect(all.find((t) => t.name === "Order")).toMatchObject({ kind: "Entity", entityKind: "Main" });
+    expect(all.find((t) => t.name === "OrderState")).toMatchObject({ kind: "Enum", entityKind: null });
+
+    const enums = JSON.parse((await cli(["types", "--url", baseUrl, "--kind", "enum", "--json"])).out) as Array<{ name: string }>;
+    expect(enums.map((t) => t.name)).toEqual(["OrderState"]);
+    const symbols = JSON.parse((await cli(["types", "--url", baseUrl, "--kind", "symbol", "--json"])).out) as Array<{ name: string }>;
+    expect(symbols.map((t) => t.name)).toEqual(["BasicPermission"]);
+    expect((await cli(["types", "--url", baseUrl, "--kind", "bogus"])).code).toBe(ExitCode.Usage);
+  });
+
+  it("explains an enum by its values, and a symbol container by its symbols with the permission caveat", async () => {
+    const e = await cli(["explain", "OrderState", "--url", baseUrl], { tty: true });
+    expect(e.out).toContain("OrderState  (Enum)");
+    expect(e.out).toContain("VALUES");
+    expect(e.out).toMatch(/Shipped\s+Shipped/);
+    const s = await cli(["explain", "BasicPermission", "--url", baseUrl], { tty: true });
+    expect(s.out).toContain("SYMBOLS");
+    expect(s.out).toContain("AdminRules");
+    expect(s.err).toContain("a permission you are denied is left out");
+  });
+
+  it("refuses to retrieve a type that is not an entity", async () => {
+    const r = await cli(["get", "OrderState", "1"], { tty: true });
+    expect(r.code).toBe(ExitCode.Usage);
+    expect(r.err).toContain("'OrderState' is an Enum, not an entity");
+  });
+
+  it("auth status and its whoami alias report the application's version", async () => {
+    const status = JSON.parse((await cli(["auth", "status", "--json"])).out) as Record<string, unknown>;
+    expect(status).toMatchObject({ appVersion: "4.2.0.0", appBuildTime: "2026-10-01T08:00:00.0000000Z" });
+    const whoami = await cli(["auth", "whoami"], { tty: true });
+    expect(whoami.code).toBe(ExitCode.Ok);
+    expect(whoami.out).toContain("App version   4.2.0.0 (built 2026-10-01T08:00:00.0000000Z)");
+  });
+
+  it("version names the target's application version", async () => {
+    const r = await cli(["version", "--url", baseUrl], { tty: true });
+    expect(r.out).toContain("app 4.2.0.0");
   });
 });
 

@@ -18,8 +18,8 @@ import type { Io } from "../src/core/ctx.ts";
 import { ExitCode } from "../src/core/errors.ts";
 
 const REFLECTION = {
-  Order: { kind: "Main", queryDefined: true, members: { Id: { type: { name: "number" } } }, operations: {} },
-  Invoice: { kind: "Main", queryDefined: true, members: {}, operations: {} },
+  Order: { kind: "Entity", entityKind: "Main", queryDefined: true, members: { Id: { type: { name: "number" } } }, operations: {} },
+  Invoice: { kind: "Entity", entityKind: "Main", queryDefined: true, members: {}, operations: {} },
 };
 
 let server: ReturnType<typeof Bun.serve> | undefined;
