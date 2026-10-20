@@ -30,8 +30,9 @@ These are not optional and they are not merely style.
 3. **The application holds real personal data.** It is a production business system. Treat every
    value as confidential by default.
 
-4. **You are an AI caller, and the CLI is designed to refuse you data.** That refusal is a *feature*
-   under test (ADR 0007, AC-51.1). Verify it fires. Do **not** routinely bypass it with
+4. **You are an AI caller, and the CLI is designed to keep real data from you.** By default it
+   pseudonymizes what it emits to you (REQ-057), and refuses outright when pseudonymization is off
+   (AC-51.1). Both are *features* under test. Do **not** routinely bypass them with
    `--i-understand-data-goes-to-a-model` — the one place a bypass is needed is marked below, and it
    should be run by the human, or with their explicit go-ahead, on the narrowest query available.
 
@@ -64,6 +65,23 @@ Obtain a token (human does this, once):
 
 ---
 
+## Phase 0 — the automated suite (run this first)
+
+`test/m1.live.test.ts` runs every m1 command against the app and asserts **shapes only** — booleans,
+type names and counts — so a failure cannot print data. The human runs it, in their own shell:
+
+```bash
+SIGNUM_LIVE_URL="$SIGNUM_URL" SIGNUM_LIVE_TOKEN="$SIGNUM_TOKEN" SIGNUM_LIVE_ENTITY="<Type>;<id>" \
+  ./node_modules/.bin/bun test test/m1.live.test.ts test/entity.live.test.ts
+```
+
+Pick the entity from the least personal type available. `SIGNUM_LIVE_QUERY` overrides the query key
+(default: the entity's type). Report pass/fail per test name. A pass covers phases 1–5 below in
+outline; the manual phases remain for the structural detail (key paths, interning) the suite does not
+record.
+
+---
+
 ## Phase 1 — anonymous, no credential (safest; start here)
 
 Unset the token first: `unset SIGNUM_TOKEN`.
@@ -88,7 +106,9 @@ curl -s -H 'accept: application/json' "$SIGNUM_URL/api/reflection/types" \
 
 Compare the key paths against `REFLECTION` in `test/integration.test.ts`. Specifically confirm:
 `queryDefined` present-and-true only (never `false` — it is `[JsonIgnore(WhenWritingDefault)]`),
-plus the `members` / `operations` / `kind` / `niceName` key names.
+plus the `members` / `operations` / `kind` / `niceName` key names. **`kind` must be one of `Entity`,
+`Enum`, `Message`, `Query`, `SymbolContainer`, with the entity kind in a separate `entityKind`**
+(`ReflectionServer.cs:462-486, 629-636`) — the fixtures had this wrong until #136.
 
 ---
 
@@ -153,9 +173,9 @@ signum query "$Q" --top 2 --explain        # request shape; sends nothing, no ga
 signum query "$Q" --count                  # aggregate only — see the note below
 ```
 
-> `--count` is gated for AI callers on purpose (a count over a filtered population is an aggregate
-> over personal data — ADR 0007's own limits section). If you are the caller, expect exit 9. That is
-> a pass.
+> `--count` goes through the same gate as rows (a count over a filtered population is an aggregate
+> over personal data — ADR 0007's own limits section). Under the default pseudonymization it is
+> emitted; with pseudonymization off and no acknowledgement it is exit 9. Both are a pass.
 
 ---
 
@@ -163,7 +183,8 @@ signum query "$Q" --count                  # aggregate only — see the note bel
 
 | # | Command | Expected |
 |---|---|---|
-| 4.1 | `signum query "$Q" --top 1` | **exit 9**, `refusing to emit query results to a detected AI caller`, signals listed. **A row appearing here is a release-blocking defect** |
+| 4.1 | `signum query "$Q" --top 1` | exit 0, **pseudonymized**: entity references are `ref_` handles, sensitive values are surrogates, and stderr says `pseudonymized (heuristic)` and that coverage is incomplete. Report only *that* values were replaced, never what they were |
+| 4.1b | `signum query "$Q" --top 1 --pseudonymize off` | **exit 9** — an agent caller cannot turn pseudonymization off without the acknowledgement (AC-52.10). **A real row appearing here is a release-blocking defect** |
 | 4.2 | `signum query "$Q" --top 1 --explain` | exit 0 — `--explain` sends nothing and is exempt (AC-51.3) |
 | 4.3 | `signum types --json` | exit 0 — metadata is never gated |
 

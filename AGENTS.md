@@ -221,8 +221,10 @@ See [ADR 0007](docs/decisions/0007-ai-caller-detection-and-pseudonymization.md) 
   process, TTY state) is spoofable in both directions and absent for unknown agents. It exists only to
   pick a **stricter** default, and it must **fail closed** — anything not provably `interactive` is at
   least `automated`. Never describe it as a guarantee, in code comments or help text.
-- **m1 refuses to emit row data under a detected `agent` context** without an explicit acknowledgement
-  flag (AC-51.2). Enforce this at the **output boundary**, in one place, so no new command can bypass it.
+- **Under a detected `agent` context, row data is emitted only pseudonymized** (REQ-057, default
+  `heuristic`), and refused outright when pseudonymization is `off` unless the acknowledgement flag is
+  given (AC-51.1, AC-51.2). Enforce this at the **output boundary**, in one place, so no new command
+  can bypass it.
 - **The framework gives us nothing.** There is no `[PersonalData]` attribute or sensitivity metadata
   anywhere in Signum, and this CLI is generic, so correct automatic classification is **impossible in
   principle**. Heuristics are a default, not a solution — say so in output (AC-52.6).

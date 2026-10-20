@@ -14,8 +14,8 @@ Quick orientation:
   ([ADR 0006](docs/decisions/0006-typescript-bun.md), superseding ADR 0005/0001). Measured: 91 MB,
   24 ms startup, five targets cross-compiled from one Linux host. The framework is a **reference to
   read, never a dependency**.
-- **Privacy:** caller detection is **not** a security boundary, and m1 refuses to emit row data under a
-  detected AI caller without an explicit flag
+- **Privacy:** caller detection is **not** a security boundary. Under a detected AI caller, row data
+  is emitted only pseudonymized, and refused without an explicit flag when pseudonymization is off
   ([ADR 0007](docs/decisions/0007-ai-caller-detection-and-pseudonymization.md)).
 - **MCP:** [ADR 0002](docs/decisions/0002-mcp-vs-http.md) is accepted — HTTP core, with the CLI
   itself exposed as an MCP server (m3).
