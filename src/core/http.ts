@@ -18,7 +18,7 @@ import {
 } from "./errors.ts";
 import { rotateCredential } from "./credentials.ts";
 import { parseLossless } from "./json.ts";
-import { handoffInstructions } from "./handoff.ts";
+import { handoffInstructions, loginCommand } from "./handoff.ts";
 
 export const REDACTED = "<redacted>";
 
@@ -31,6 +31,8 @@ export interface HttpOptions {
   /** Called when the server rotates the token, so it can be persisted. */
   onTokenRotated?: ((token: string) => void) | undefined;
   env?: NodeJS.ProcessEnv;
+  /** The instance name the target was given by, so a login hint can name it back. */
+  instance?: string | undefined;
 }
 
 /**
@@ -164,7 +166,7 @@ export class SignumHttp {
       headers["Authorization"] = `Bearer ${this.opts.token}`;
     } else if (spec.allowAnonymous !== true) {
       throw new NotAuthenticatedError("no stored credential for this target", {
-        hint: "Run `signum auth login --url <url> --with-token`. See `signum help auth`.",
+        hint: "Run `" + loginCommand(this.opts.baseUrl, this.opts.instance) + " --with-token`. See `signum help auth`.",
       });
     }
 
@@ -256,7 +258,7 @@ export class SignumHttp {
           hint:
             "The token is no longer accepted, so a fresh browser handoff is required.\n" +
             "(If it came from SIGNUM_TOKEN, replace the variable's value instead.)\n\n" +
-            handoffInstructions(this.opts.baseUrl),
+            handoffInstructions(this.opts.baseUrl, this.opts.instance),
         });
       }
       if (type.includes("UnauthorizedAccessException")) {
