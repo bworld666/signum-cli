@@ -111,6 +111,8 @@ const QUERY_DESCRIPTION = {
 
 /** Every executeQuery request the mock received, so tests can assert what was actually sent. */
 const executeQueryRequests: Array<{ queryKey: string; columns: Array<{ token: string }> }> = [];
+/** Bodies sent to api/query/lites|entities (REQ-024), for asserting the QueryEntitiesRequestTS shape. */
+const variantRequests: Array<{ path: string; body: Record<string, unknown> }> = [];
 
 /**
  * Every parseTokens request, so a test can assert the token lists were validated in ONE round trip
@@ -351,6 +353,15 @@ beforeAll(() => {
       }
       if (url.pathname.startsWith("/api/query/description/")) {
         return new Response(JSON.stringify(QUERY_DESCRIPTION), { headers });
+      }
+      // QueryController.cs:104-114: Lite[] and Entity[]; ids written as text so they stay exact.
+      if (url.pathname === "/api/query/lites/Order" || url.pathname === "/api/query/entities/Order") {
+        variantRequests.push({ path: url.pathname, body: (await req.json()) as Record<string, unknown> });
+        return new Response(url.pathname.startsWith("/api/query/lites/")
+          ? `[{"EntityType":"Order","id":1,"model":"Order 1"},{"EntityType":"Order","id":9007199254740993,"model":"Order big"}]`
+          : `[{"Type":"Order","id":1,"ticks":"638","toStr":"Order 1","name":"Acme GmbH",` +
+            `"customer":{"EntityType":"Customer","id":7,"model":"Anna Müller"}}]`,
+          { headers });
       }
       if (url.pathname.startsWith("/api/query/executeQuery/") && exactResultTable) {
         return new Response(EXACT_RESULT_TABLE, { headers });
@@ -2406,6 +2417,84 @@ describe("named instances (REQ-001)", () => {
     expect((await cli(["instance", "remove", "local"], { env })).code).toBe(ExitCode.NotFound);
     expect(existsSync(join(d, "credential.json"))).toBe(true);
     rmSync(d, { recursive: true, force: true });
+  });
+});
+
+/** REQ-024's result variants: the same query answered as references or as whole entities. */
+describe("query --lites and --entities (REQ-024)", () => {
+  const human = { tty: true };
+
+  it("sends QueryEntitiesRequestTS — filters, orders, count — and nothing a table query sends", async () => {
+    variantRequests.length = 0;
+    const r = await cli(["query", "Order", "--lites", "--top", "2", "--filter", "State = Shipped", "--order", "-Total", "--json"], human);
+    expect(r.code).toBe(ExitCode.Ok);
+    expect(variantRequests[0]?.path).toBe("/api/query/lites/Order");
+    const body = variantRequests[0]!.body;
+    expect(Object.keys(body).sort()).toEqual(["count", "filters", "orders", "queryKey"]);
+    expect(body).toMatchObject({ queryKey: "Order", count: 2, orders: [{ token: "Total", orderType: "Descending" }] });
+    expect(JSON.stringify(body["filters"])).toContain("Shipped");
+  });
+
+  it("--all leaves count out (unbounded); the default stays bounded", async () => {
+    variantRequests.length = 0;
+    await cli(["query", "Order", "--lites", "--all", "--json"], human);
+    await cli(["query", "Order", "--lites", "--json"], human);
+    expect("count" in variantRequests[0]!.body).toBe(false);
+    expect(variantRequests[1]!.body["count"]).toBe(50);
+  });
+
+  it("lists references for a human, exact ids included", async () => {
+    const table = await cli(["query", "Order", "--lites"], human)
+    expect(table.out).toBe("Order;1  Order 1\nOrder;9007199254740993  Order big\n");
+    const names = await cli(["query", "Order", "--lites", "-o", "name"], human);
+    expect(names.out).toBe("Order;1\nOrder;9007199254740993\n");
+  });
+
+  it("gives an agent handles, never ids or labels, and stores them first", async () => {
+    const d = mkdtempSync(join(tmpdir(), "signum-variants-"));
+    writeFileSync(join(d, "credential.json"), readFileSync(join(configDir, "credential.json")));
+    const r = await cli(["query", "Order", "--lites", "--json"], { env: { SIGNUM_CONFIG_DIR: d, CLAUDECODE: "1" } });
+    expect(r.code).toBe(ExitCode.Ok);
+    const out = JSON.parse(r.out) as string[];
+    expect(out.every((h) => h.startsWith(HANDLE_PREFIX))).toBe(true);
+    expect(r.out).not.toContain("Order 1");
+    expect(r.out).not.toContain("9007199254740993");
+    const stored = loadHandles({ SIGNUM_CONFIG_DIR: d } as unknown as NodeJS.ProcessEnv);
+    expect(stored[out[1]!]).toBe("Order;9007199254740993");
+    rmSync(d, { recursive: true, force: true });
+  });
+
+  it("returns whole entities, each pseudonymized as its own document for an agent", async () => {
+    const plain = await cli(["query", "Order", "--entities", "--json"], human);
+    expect(JSON.parse(plain.out)[0]).toMatchObject({ Type: "Order", id: 1, name: "Acme GmbH" });
+
+    const d = mkdtempSync(join(tmpdir(), "signum-variants-"));
+    writeFileSync(join(d, "credential.json"), readFileSync(join(configDir, "credential.json")));
+    const agent = await cli(["query", "Order", "--entities", "--json"], { env: { SIGNUM_CONFIG_DIR: d, CLAUDECODE: "1" } });
+    const doc = (JSON.parse(agent.out) as Array<Record<string, unknown>>)[0]!;
+    expect(doc["Type"]).toBe("Order");                       // the document survives, not one handle
+    expect(String(doc["id"])).toStartWith(HANDLE_PREFIX);    // its own identity is a handle
+    expect(String(doc["customer"])).toStartWith(HANDLE_PREFIX);
+    expect(agent.out).not.toContain("Acme GmbH");
+    expect(agent.out).not.toContain("Anna Müller");
+    rmSync(d, { recursive: true, force: true });
+  });
+
+  it("refuses flags the endpoints cannot honour, rather than dropping them", async () => {
+    for (const extra of [["--column", "Total"], ["--group"], ["--count"], ["--resolve"], ["--page", "2"], ["--entities"]]) {
+      const r = await cli(["query", "Order", "--lites", ...extra], human);
+      expect(r.code).toBe(ExitCode.Usage);
+    }
+    expect((await cli(["query", "Order", "--entities", "-o", "csv"], human)).code).toBe(ExitCode.Usage);
+    expect((await cli(["query", "Order", "--entities", "-o", "name"], human)).code).toBe(ExitCode.Usage);
+  });
+
+  it("--explain names the variant endpoint and sends nothing", async () => {
+    variantRequests.length = 0;
+    const r = await cli(["query", "Order", "--entities", "--top", "3", "--explain"], human);
+    expect(r.out).toContain("/api/query/entities/Order");
+    expect(r.out).toContain('"count": 3');
+    expect(variantRequests).toEqual([]);
   });
 });
 

@@ -30,6 +30,7 @@ import { opt, optAll, flag } from "../core/ctx.ts";
 import { resolveTarget, type Target } from "../core/target.ts";
 import type { SignumHttp } from "../core/http.ts";
 import { readFileSync } from "node:fs";
+import { countFrom, requestedVariant, runVariant, variantRequest } from "./query-variants.ts";
 
 interface OrderSpec { token: string; orderType: "Ascending" | "Descending" }
 
@@ -201,7 +202,7 @@ async function planColumns(
   ctx: Ctx,
   http: SignumHttp,
   queryKey: string,
-  inputs: { groupEnabled: boolean; wantCount: boolean; filters: FilterWire[] },
+  inputs: { groupEnabled: boolean; wantCount: boolean; filters: FilterWire[]; noColumns?: boolean },
 ): Promise<ColumnPlan> {
   const { groupEnabled, wantCount } = inputs;
 
@@ -281,7 +282,7 @@ async function planColumns(
     columnLabels = resolved.labels;
   }
 
-  if (requestedColumns.length === 0 && !groupEnabled && !wantCount) {
+  if (requestedColumns.length === 0 && !groupEnabled && !wantCount && inputs.noColumns !== true) {
     // --group is excluded: a grouped query's columns are the grouping keys plus aggregates, which
     // only the caller can choose. Defaulting them would invent a query nobody asked for.
     try {
@@ -388,6 +389,8 @@ export async function runQuery(ctx: Ctx): Promise<ExitCode> {
 
   // Local diagnostics FIRST, before the privacy gate — see parseLocalInputs.
   const { groupEnabled, dslFilters, jsonFilters, pagination } = parseLocalInputs(ctx);
+  const variant = requestedVariant(ctx); // REQ-024: --lites / --entities, also local
+  const variantCount = variant !== undefined ? countFrom(pagination) : null;
 
   // The gate is unconditional from here on, evaluated before touching credentials or the
   // network: being told to fix auth and *then* refused would be two round trips of confusion.
@@ -415,7 +418,7 @@ export async function runQuery(ctx: Ctx): Promise<ExitCode> {
   const wantCount = flag(ctx, "count");
 
   const plan = await planColumns(ctx, target.http, queryKey, {
-    groupEnabled, wantCount, filters: [...dslFilters, ...jsonFilters],
+    groupEnabled, wantCount, filters: [...dslFilters, ...jsonFilters], noColumns: variant !== undefined,
   });
   const { orders, effectiveColumns } = plan;
 
@@ -428,14 +431,9 @@ export async function runQuery(ctx: Ctx): Promise<ExitCode> {
   const handles = loadHandles(ctx.io.env);
   const filters: FilterWire[] = resolveHandlesInFilters([...dslFilters, ...jsonFilters], handles);
 
-  const request: Record<string, unknown> = {
-    queryKey,
-    groupResults: groupEnabled,
-    filters,
-    orders,
-    columns,
-    pagination,
-  };
+  const request: Record<string, unknown> = variant !== undefined
+    ? variantRequest(queryKey, filters, orders, variantCount)
+    : { queryKey, groupResults: groupEnabled, filters, orders, columns, pagination };
 
   // REQ-078: print the command a HUMAN should run, and send nothing. Sits beside --explain because
   // it is the same shape of thing — emit a description instead of doing the work — and it lands
@@ -448,12 +446,13 @@ export async function runQuery(ctx: Ctx): Promise<ExitCode> {
   // --explain prints the request and sends nothing (AC-20.6).
   if (ctx.args.flags.explain) {
     renderDocument(
-      { method: "POST", url: `${target.url}/api/query/${wantCount ? "queryValue" : "executeQuery"}/${queryKey}`, body: request },
+      { method: "POST", url: `${target.url}/api/query/${variant ?? (wantCount ? "queryValue" : "executeQuery")}/${queryKey}`, body: request },
       { format: ctx.format === "table" ? "json" : ctx.format, write: ctx.io.out },
     );
     return ExitCode.Ok;
   }
 
+  if (variant !== undefined) return await runVariant(ctx, target, variant, request, () => ctx.openData(DATA_KIND));
   return wantCount
     ? await runCount(ctx, target, queryKey, request)
     : await runTable(ctx, target, queryKey, request, plan);
