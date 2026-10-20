@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  addInstance, instancesPath, listInstances, removeInstance, resolveInstance, slugFromUrl, validateSlug, validateUrl,
+  addInstance, instancesPath, listInstances, removeInstance, resolveInstance, validateSlug, validateUrl,
 } from "../src/core/instances.ts";
 import { parseArgs } from "../src/core/args.ts";
 
@@ -18,20 +18,6 @@ function env(): NodeJS.ProcessEnv {
   return { SIGNUM_CONFIG_DIR: d } as NodeJS.ProcessEnv;
 }
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
-
-describe("deriving a name from a URL", () => {
-  it("takes the first host label", () => {
-    expect(slugFromUrl("https://renew.example.org/home")).toBe("renew");
-    expect(slugFromUrl("https://Renew.Example.org")).toBe("renew");
-    expect(slugFromUrl("http://localhost:5000")).toBe("localhost");
-  });
-
-  it("refuses an IP address, whose first label names nothing", () => {
-    expect(slugFromUrl("http://127.0.0.1:5000")).toBeUndefined();
-    expect(slugFromUrl("http://[::1]:5000")).toBeUndefined();
-    expect(slugFromUrl("not a url")).toBeUndefined();
-  });
-});
 
 describe("validation", () => {
   it("lowercases a name and rejects anything that is not a plain word", () => {

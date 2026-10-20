@@ -2340,7 +2340,7 @@ describe("named instances (REQ-001)", () => {
   it("registers a URL under a name and targets it with -i", async () => {
     const d = profile();
     const env = { SIGNUM_CONFIG_DIR: d };
-    expect((await cli(["instance", "add", baseUrl, "local"], { env })).code).toBe(ExitCode.Ok);
+    expect((await cli(["instance", "add", "local", baseUrl], { env })).code).toBe(ExitCode.Ok);
     const list = await cli(["instance", "list", "--json"], { env });
     expect(JSON.parse(list.out)).toEqual([{ slug: "local", url: baseUrl }]);
 
@@ -2354,25 +2354,33 @@ describe("named instances (REQ-001)", () => {
   it("reaches the stored credential, which is matched by URL", async () => {
     const d = profile();
     const env = { SIGNUM_CONFIG_DIR: d };
-    await cli(["instance", "add", baseUrl, "local"], { env });
+    await cli(["instance", "add", "local", baseUrl], { env });
     const r = await cli(["get", "Order", "42", "-i", "local", "--json"], { env, tty: true });
     expect(r.code).toBe(ExitCode.Ok);
     expect((JSON.parse(r.out) as { id: number }).id).toBe(42);
     rmSync(d, { recursive: true, force: true });
   });
 
-  it("asks for a name when the URL has none to derive (an IP address)", async () => {
+  it("always needs a name — it is never derived from the URL", async () => {
     const d = profile();
-    const r = await cli(["instance", "add", baseUrl], { env: { SIGNUM_CONFIG_DIR: d } });
-    expect(r.code).toBe(ExitCode.Usage);
-    expect(r.err).toContain("cannot derive a name");
+    const env = { SIGNUM_CONFIG_DIR: d };
+    const urlOnly = await cli(["instance", "add", "https://renew.example.org/home"], { env });
+    expect(urlOnly.code).toBe(ExitCode.Usage);
+    expect(urlOnly.err).toContain("needs a name before the URL");
+    const nameOnly = await cli(["instance", "add", "renew"], { env });
+    expect(nameOnly.code).toBe(ExitCode.Usage);
+    expect(nameOnly.err).toContain("needs a name and a URL");
+    const reversed = await cli(["instance", "add", baseUrl, "local"], { env });
+    expect(reversed.code).toBe(ExitCode.Usage);
+    expect(reversed.err).toContain("takes the name first");
+    expect(existsSync(join(d, "instances.json"))).toBe(false);
     rmSync(d, { recursive: true, force: true });
   });
 
   it("an unknown name fails before any request, naming what exists", async () => {
     const d = profile();
     const env = { SIGNUM_CONFIG_DIR: d };
-    await cli(["instance", "add", baseUrl, "local"], { env });
+    await cli(["instance", "add", "local", baseUrl], { env });
     const r = await cli(["types", "-i", "locl"], { env });
     expect(r.code).toBe(ExitCode.Usage);
     expect(r.err).toContain("unknown instance 'locl'");
@@ -2383,7 +2391,7 @@ describe("named instances (REQ-001)", () => {
   it("echoes -i, not the URL it resolved to (REQ-078)", async () => {
     const d = profile();
     const env = { SIGNUM_CONFIG_DIR: d };
-    await cli(["instance", "add", baseUrl, "local"], { env });
+    await cli(["instance", "add", "local", baseUrl], { env });
     const r = await cli(["query", "Order", "-i", "local", "--as-command"], { env });
     expect(r.code).toBe(ExitCode.Ok);
     expect(r.out.trim()).toBe("signum query Order -i local");
@@ -2393,7 +2401,7 @@ describe("named instances (REQ-001)", () => {
   it("remove forgets the name and keeps the login", async () => {
     const d = profile();
     const env = { SIGNUM_CONFIG_DIR: d };
-    await cli(["instance", "add", baseUrl, "local"], { env });
+    await cli(["instance", "add", "local", baseUrl], { env });
     expect((await cli(["instance", "remove", "local"], { env })).code).toBe(ExitCode.Ok);
     expect((await cli(["instance", "remove", "local"], { env })).code).toBe(ExitCode.NotFound);
     expect(existsSync(join(d, "credential.json"))).toBe(true);
