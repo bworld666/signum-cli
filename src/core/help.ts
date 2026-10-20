@@ -36,7 +36,7 @@ export const GLOBAL_FLAGS: FlagSpec[] = [
   { name: "output", alias: "o", arg: "<fmt>", summary: `Output format: ${OUTPUT_FORMATS.join(", ")}` },
   { name: "json", summary: "Alias for --output json" },
   { name: "explain", summary: "Print the request instead of sending it (metadata may be fetched)" },
-  { name: "verbose", alias: "v", summary: "HTTP tracing, credentials redacted" },
+  { name: "verbose", alias: "v", summary: "HTTP tracing, credentials redacted; an AI caller needs the ack flag" },
   { name: "no-color", summary: "Disable colour (also honours NO_COLOR)" },
   { name: "timeout", arg: "<seconds>", summary: "Request timeout" },
   { name: "caller-context", arg: "<ctx>", summary: "Override caller detection: interactive|automated|agent" },

@@ -8,7 +8,7 @@ import { assertKnownFlags, BUILT_INS, flagCheckPath, parseArgs, type ParsedArgs 
 import { nearest } from "./core/text.ts";
 import { CliError, ExitCode, UsageError, exitCodeOf } from "./core/errors.ts";
 import { detectCallerContext } from "./core/caller.ts";
-import { makeDataOpener } from "./core/policy.ts";
+import { assertMayTrace, makeDataOpener } from "./core/policy.ts";
 import { parseMode, resolvePolicy } from "./core/privacy.ts";
 import { colorEnabled, effectiveFormat, renderDocument, type OutputFormat } from "./core/output.ts";
 import {
@@ -125,6 +125,9 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitCode> {
   if (args.kind === "none" || args.flags.help || args.command === "help") {
     return showHelp(args, io);
   }
+
+  // Before any request is made, so a refused trace never prints a line (#128).
+  if (args.flags.verbose) assertMayTrace(caller, args.flags.allowAgentData);
 
   const privacy = resolvePolicy({
     callerIsAgent: caller.context === "agent",
