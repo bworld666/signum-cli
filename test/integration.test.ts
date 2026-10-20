@@ -37,13 +37,16 @@ let anonymousUserConfigured = false;
 
 const REFLECTION = {
   Order: {
-    kind: "Main",
+    kind: "Entity", entityKind: "Main",
     niceName: "Order",
     queryDefined: true,
     members: {
       Id: { type: { name: "number" }, niceName: "Id" },
-      State: { type: { name: "string" }, niceName: "State" },
+      // Enum-typed, as on a real app: reflection lists OrderState as kind Enum, and an enum value
+      // is not an identity even though a type of that name exists.
+      State: { type: { name: "OrderState" }, niceName: "State" },
       Total: { type: { name: "decimal" }, niceName: "Total" },
+      Owner: { type: { name: "UserEntity" }, niceName: "Owner" },
     },
     operations: {
       "OrderOperation.Ship": { niceName: "Ship" },
@@ -51,7 +54,7 @@ const REFLECTION = {
     },
   },
   UserEntity: {
-    kind: "Main",
+    kind: "Entity", entityKind: "Main",
     niceName: "User",
     queryDefined: true,
     members: {
@@ -64,16 +67,25 @@ const REFLECTION = {
     },
     operations: { "UserOperation.Save": { niceName: "Save" } },
   },
+  // The non-entity kinds reflection lists beside entities (KindOfType, ReflectionServer.cs:629-636).
+  OrderState: {
+    kind: "Enum", niceName: "Order state",
+    members: { Shipped: { niceName: "Shipped" }, Delivered: { niceName: "Delivered" } },
+  },
+  BasicPermission: {
+    kind: "SymbolContainer", niceName: "Basic permission",
+    members: { AdminRules: { niceName: "Admin rules", id: 7 } },
+  },
   // Exist purely so their query keys pass the metadata-validation step before hitting the
   // 400/500 fixture routes above.
-  BadInput: { kind: "Main", queryDefined: true, members: {}, operations: {} },
-  Broken: { kind: "Main", queryDefined: true, members: {}, operations: {} },
+  BadInput: { kind: "Entity", entityKind: "Main", queryDefined: true, members: {}, operations: {} },
+  Broken: { kind: "Entity", entityKind: "Main", queryDefined: true, members: {}, operations: {} },
   // A reflected type with NO query. `queryDefined` is omitted rather than set to false because
   // that is what the wire looks like: TypeInfoTS.QueryDefined carries
   // [JsonIgnore(WhenWritingDefault)] (ReflectionServer.cs:474), so false is simply absent.
   // `signum queries` must not offer it, and `signum query` must not accept it — those two used
   // to disagree.
-  Ledger: { kind: "Main", niceName: "Ledger", members: { Id: { type: { name: "number" } } }, operations: {} },
+  Ledger: { kind: "Entity", entityKind: "Main", niceName: "Ledger", members: { Id: { type: { name: "number" } } }, operations: {} },
 };
 
 /**
@@ -99,6 +111,8 @@ const QUERY_DESCRIPTION = {
 
 /** Every executeQuery request the mock received, so tests can assert what was actually sent. */
 const executeQueryRequests: Array<{ queryKey: string; columns: Array<{ token: string }> }> = [];
+/** Bodies sent to api/query/lites|entities (REQ-024), for asserting the QueryEntitiesRequestTS shape. */
+const variantRequests: Array<{ path: string; body: Record<string, unknown> }> = [];
 
 /**
  * Every parseTokens request, so a test can assert the token lists were validated in ONE round trip
@@ -216,7 +230,10 @@ beforeAll(() => {
       const auth = req.headers.get("authorization");
       const token = auth?.replace(/^Bearer /, "");
 
-      const headers: Record<string, string> = { "content-type": "application/json" };
+      // VersionFilterAttribute is a default MVC filter (SignumServer.cs:70): every action answers with these.
+      const headers: Record<string, string> = {
+        "content-type": "application/json", "x-app-version": "4.2.0.0", "x-app-buildtime": "2026-10-01T08:00:00.0000000Z",
+      };
       if (rotateNext && token === GOOD_TOKEN) {
         headers["New_Token"] = ROTATED_TOKEN; // AuthTokensServer.cs:85-94
         rotateNext = false;
@@ -337,6 +354,15 @@ beforeAll(() => {
       if (url.pathname.startsWith("/api/query/description/")) {
         return new Response(JSON.stringify(QUERY_DESCRIPTION), { headers });
       }
+      // QueryController.cs:104-114: Lite[] and Entity[]; ids written as text so they stay exact.
+      if (url.pathname === "/api/query/lites/Order" || url.pathname === "/api/query/entities/Order") {
+        variantRequests.push({ path: url.pathname, body: (await req.json()) as Record<string, unknown> });
+        return new Response(url.pathname.startsWith("/api/query/lites/")
+          ? `[{"EntityType":"Order","id":1,"model":"Order 1"},{"EntityType":"Order","id":9007199254740993,"model":"Order big"}]`
+          : `[{"Type":"Order","id":1,"ticks":"638","toStr":"Order 1","name":"Acme GmbH",` +
+            `"customer":{"EntityType":"Customer","id":7,"model":"Anna Müller"}}]`,
+          { headers });
+      }
       if (url.pathname.startsWith("/api/query/executeQuery/") && exactResultTable) {
         return new Response(EXACT_RESULT_TABLE, { headers });
       }
@@ -374,6 +400,28 @@ beforeAll(() => {
           JSON.stringify({ exceptionType: "System.UnauthorizedAccessException", exceptionMessage: "not allowed" }),
           { status: 403, headers },
         );
+      }
+      // m1 error mapping (REQ-051/052): one route per server answer an m1 command can meet.
+      if (url.pathname === "/api/entity/Order/403") {
+        return new Response(JSON.stringify({
+          exceptionType: "System.UnauthorizedAccessException",
+          exceptionMessage: "Not authorized to retrieve 'Orders'", // AuthMessage.NotAuthorizedToRetrieve0 (AuthMessages.cs:130)
+        }), { status: 403, headers });
+      }
+      if (url.pathname === "/api/entity/Order/419") {
+        return new Response(JSON.stringify({
+          exceptionType: "Signum.Engine.Authorization.AuthenticationException",
+          exceptionMessage: "The token is no longer valid",
+        }), { status: 403, headers });
+      }
+      if (url.pathname === "/api/entity/Order/409") {
+        return new Response(JSON.stringify({
+          exceptionType: "Signum.Engine.ConcurrencyException",
+          exceptionMessage: "Concurrency error: Order 409 was modified",
+        }), { status: 500, headers });
+      }
+      if (url.pathname === "/api/entity/Order/401") {
+        return new Response("Unauthorized", { status: 401 });
       }
       if (url.pathname === "/api/entity/Order/400") {
         return new Response(JSON.stringify({ title: "bad request" }), { status: 400, headers });
@@ -423,7 +471,7 @@ describe("discovery without credentials (STORY-24, STORY-61)", () => {
     const r = await cli(["types", "--url", baseUrl, "--json"]);
     expect(r.code).toBe(ExitCode.Ok);
     const types = JSON.parse(r.out) as Array<{ name: string }>;
-    expect(types.map((t) => t.name).sort()).toEqual(["BadInput", "Broken", "Ledger", "Order", "UserEntity"]);
+    expect(types.map((t) => t.name).sort()).toEqual(["BadInput", "BasicPermission", "Broken", "Ledger", "Order", "OrderState", "UserEntity"]);
   });
 
   it("explains a type from metadata", async () => {
@@ -431,7 +479,7 @@ describe("discovery without credentials (STORY-24, STORY-61)", () => {
     expect(r.code).toBe(ExitCode.Ok);
     const doc = JSON.parse(r.out) as { name: string; members: unknown[] };
     expect(doc.name).toBe("Order");
-    expect(doc.members.length).toBe(3);
+    expect(doc.members.length).toBe(4);
   });
 
   it("flags an operation verb shadowed by a built-in (AC-41.8)", async () => {
@@ -1901,7 +1949,8 @@ describe("ref: handles, end to end (REQ-058)", () => {
       const g = await cli(["get", handle, "--json"], agent(d));
       expect(g.code).toBe(ExitCode.Ok);
       expect((JSON.parse(g.out) as Record<string, unknown>)["id"]).toBe(handle);
-      expect(g.out).not.toContain("42");
+      // Not a bare "42" check: the handle is random hex and may contain those digits.
+      expect(g.out).not.toMatch(/"id":\s*42\b|Order;42/);
       rmSync(d, { recursive: true, force: true });
     });
 
@@ -2024,6 +2073,10 @@ describe("explain --privacy agrees with what the query actually does (AC-52.11)"
     };
     const state = doc.members.find((m) => m.member === "State");
     expect(state).toMatchObject({ pseudonymize: false, reason: "not-sensitive" });
+    // Owner references an entity, so it IS an identity; State's type is an enum, so it is not —
+    // treating any known type name as an entity made every enum column an identity.
+    const owner = doc.members.find((m) => m.member === "Owner");
+    expect(owner).toMatchObject({ pseudonymize: true });
   });
 
   it("says nothing is hidden when the mode is off", async () => {
@@ -2298,7 +2351,7 @@ describe("named instances (REQ-001)", () => {
   it("registers a URL under a name and targets it with -i", async () => {
     const d = profile();
     const env = { SIGNUM_CONFIG_DIR: d };
-    expect((await cli(["instance", "add", baseUrl, "local"], { env })).code).toBe(ExitCode.Ok);
+    expect((await cli(["instance", "add", "local", baseUrl], { env })).code).toBe(ExitCode.Ok);
     const list = await cli(["instance", "list", "--json"], { env });
     expect(JSON.parse(list.out)).toEqual([{ slug: "local", url: baseUrl }]);
 
@@ -2312,25 +2365,33 @@ describe("named instances (REQ-001)", () => {
   it("reaches the stored credential, which is matched by URL", async () => {
     const d = profile();
     const env = { SIGNUM_CONFIG_DIR: d };
-    await cli(["instance", "add", baseUrl, "local"], { env });
+    await cli(["instance", "add", "local", baseUrl], { env });
     const r = await cli(["get", "Order", "42", "-i", "local", "--json"], { env, tty: true });
     expect(r.code).toBe(ExitCode.Ok);
     expect((JSON.parse(r.out) as { id: number }).id).toBe(42);
     rmSync(d, { recursive: true, force: true });
   });
 
-  it("asks for a name when the URL has none to derive (an IP address)", async () => {
+  it("always needs a name — it is never derived from the URL", async () => {
     const d = profile();
-    const r = await cli(["instance", "add", baseUrl], { env: { SIGNUM_CONFIG_DIR: d } });
-    expect(r.code).toBe(ExitCode.Usage);
-    expect(r.err).toContain("cannot derive a name");
+    const env = { SIGNUM_CONFIG_DIR: d };
+    const urlOnly = await cli(["instance", "add", "https://renew.example.org/home"], { env });
+    expect(urlOnly.code).toBe(ExitCode.Usage);
+    expect(urlOnly.err).toContain("needs a name before the URL");
+    const nameOnly = await cli(["instance", "add", "renew"], { env });
+    expect(nameOnly.code).toBe(ExitCode.Usage);
+    expect(nameOnly.err).toContain("needs a name and a URL");
+    const reversed = await cli(["instance", "add", baseUrl, "local"], { env });
+    expect(reversed.code).toBe(ExitCode.Usage);
+    expect(reversed.err).toContain("takes the name first");
+    expect(existsSync(join(d, "instances.json"))).toBe(false);
     rmSync(d, { recursive: true, force: true });
   });
 
   it("an unknown name fails before any request, naming what exists", async () => {
     const d = profile();
     const env = { SIGNUM_CONFIG_DIR: d };
-    await cli(["instance", "add", baseUrl, "local"], { env });
+    await cli(["instance", "add", "local", baseUrl], { env });
     const r = await cli(["types", "-i", "locl"], { env });
     expect(r.code).toBe(ExitCode.Usage);
     expect(r.err).toContain("unknown instance 'locl'");
@@ -2341,7 +2402,7 @@ describe("named instances (REQ-001)", () => {
   it("echoes -i, not the URL it resolved to (REQ-078)", async () => {
     const d = profile();
     const env = { SIGNUM_CONFIG_DIR: d };
-    await cli(["instance", "add", baseUrl, "local"], { env });
+    await cli(["instance", "add", "local", baseUrl], { env });
     const r = await cli(["query", "Order", "-i", "local", "--as-command"], { env });
     expect(r.code).toBe(ExitCode.Ok);
     expect(r.out.trim()).toBe("signum query Order -i local");
@@ -2351,11 +2412,205 @@ describe("named instances (REQ-001)", () => {
   it("remove forgets the name and keeps the login", async () => {
     const d = profile();
     const env = { SIGNUM_CONFIG_DIR: d };
-    await cli(["instance", "add", baseUrl, "local"], { env });
+    await cli(["instance", "add", "local", baseUrl], { env });
     expect((await cli(["instance", "remove", "local"], { env })).code).toBe(ExitCode.Ok);
     expect((await cli(["instance", "remove", "local"], { env })).code).toBe(ExitCode.NotFound);
     expect(existsSync(join(d, "credential.json"))).toBe(true);
     rmSync(d, { recursive: true, force: true });
+  });
+});
+
+/** REQ-024's result variants: the same query answered as references or as whole entities. */
+describe("query --lites and --entities (REQ-024)", () => {
+  const human = { tty: true };
+
+  it("sends QueryEntitiesRequestTS — filters, orders, count — and nothing a table query sends", async () => {
+    variantRequests.length = 0;
+    const r = await cli(["query", "Order", "--lites", "--top", "2", "--filter", "State = Shipped", "--order", "-Total", "--json"], human);
+    expect(r.code).toBe(ExitCode.Ok);
+    expect(variantRequests[0]?.path).toBe("/api/query/lites/Order");
+    const body = variantRequests[0]!.body;
+    expect(Object.keys(body).sort()).toEqual(["count", "filters", "orders", "queryKey"]);
+    expect(body).toMatchObject({ queryKey: "Order", count: 2, orders: [{ token: "Total", orderType: "Descending" }] });
+    expect(JSON.stringify(body["filters"])).toContain("Shipped");
+  });
+
+  it("--all leaves count out (unbounded); the default stays bounded", async () => {
+    variantRequests.length = 0;
+    await cli(["query", "Order", "--lites", "--all", "--json"], human);
+    await cli(["query", "Order", "--lites", "--json"], human);
+    expect("count" in variantRequests[0]!.body).toBe(false);
+    expect(variantRequests[1]!.body["count"]).toBe(50);
+  });
+
+  it("lists references for a human, exact ids included", async () => {
+    const table = await cli(["query", "Order", "--lites"], human)
+    expect(table.out).toBe("Order;1  Order 1\nOrder;9007199254740993  Order big\n");
+    const names = await cli(["query", "Order", "--lites", "-o", "name"], human);
+    expect(names.out).toBe("Order;1\nOrder;9007199254740993\n");
+  });
+
+  it("gives an agent handles, never ids or labels, and stores them first", async () => {
+    const d = mkdtempSync(join(tmpdir(), "signum-variants-"));
+    writeFileSync(join(d, "credential.json"), readFileSync(join(configDir, "credential.json")));
+    const r = await cli(["query", "Order", "--lites", "--json"], { env: { SIGNUM_CONFIG_DIR: d, CLAUDECODE: "1" } });
+    expect(r.code).toBe(ExitCode.Ok);
+    const out = JSON.parse(r.out) as string[];
+    expect(out.every((h) => h.startsWith(HANDLE_PREFIX))).toBe(true);
+    expect(r.out).not.toContain("Order 1");
+    expect(r.out).not.toContain("9007199254740993");
+    const stored = loadHandles({ SIGNUM_CONFIG_DIR: d } as unknown as NodeJS.ProcessEnv);
+    expect(stored[out[1]!]).toBe("Order;9007199254740993");
+    rmSync(d, { recursive: true, force: true });
+  });
+
+  it("returns whole entities, each pseudonymized as its own document for an agent", async () => {
+    const plain = await cli(["query", "Order", "--entities", "--json"], human);
+    expect(JSON.parse(plain.out)[0]).toMatchObject({ Type: "Order", id: 1, name: "Acme GmbH" });
+
+    const d = mkdtempSync(join(tmpdir(), "signum-variants-"));
+    writeFileSync(join(d, "credential.json"), readFileSync(join(configDir, "credential.json")));
+    const agent = await cli(["query", "Order", "--entities", "--json"], { env: { SIGNUM_CONFIG_DIR: d, CLAUDECODE: "1" } });
+    const doc = (JSON.parse(agent.out) as Array<Record<string, unknown>>)[0]!;
+    expect(doc["Type"]).toBe("Order");                       // the document survives, not one handle
+    expect(String(doc["id"])).toStartWith(HANDLE_PREFIX);    // its own identity is a handle
+    expect(String(doc["customer"])).toStartWith(HANDLE_PREFIX);
+    expect(agent.out).not.toContain("Acme GmbH");
+    expect(agent.out).not.toContain("Anna Müller");
+    rmSync(d, { recursive: true, force: true });
+  });
+
+  it("refuses flags the endpoints cannot honour, rather than dropping them", async () => {
+    for (const extra of [["--column", "Total"], ["--group"], ["--count"], ["--resolve"], ["--page", "2"], ["--entities"]]) {
+      const r = await cli(["query", "Order", "--lites", ...extra], human);
+      expect(r.code).toBe(ExitCode.Usage);
+    }
+    expect((await cli(["query", "Order", "--entities", "-o", "csv"], human)).code).toBe(ExitCode.Usage);
+    expect((await cli(["query", "Order", "--entities", "-o", "name"], human)).code).toBe(ExitCode.Usage);
+  });
+
+  it("--explain names the variant endpoint and sends nothing", async () => {
+    variantRequests.length = 0;
+    const r = await cli(["query", "Order", "--entities", "--top", "3", "--explain"], human);
+    expect(r.out).toContain("/api/query/entities/Order");
+    expect(r.out).toContain('"count": 3');
+    expect(variantRequests).toEqual([]);
+  });
+});
+
+/** Discovery beyond entities (REQ-011) and the identity check's app version (REQ-007). */
+describe("enums, symbols and the app version (REQ-011, REQ-007)", () => {
+  it("lists types by kind, keeping KindOfType and the entity kind apart", async () => {
+    const all = JSON.parse((await cli(["types", "--url", baseUrl, "--json"])).out) as Array<{ name: string; kind: string; entityKind: string | null }>;
+    expect(all.find((t) => t.name === "Order")).toMatchObject({ kind: "Entity", entityKind: "Main" });
+    expect(all.find((t) => t.name === "OrderState")).toMatchObject({ kind: "Enum", entityKind: null });
+
+    const enums = JSON.parse((await cli(["types", "--url", baseUrl, "--kind", "enum", "--json"])).out) as Array<{ name: string }>;
+    expect(enums.map((t) => t.name)).toEqual(["OrderState"]);
+    const symbols = JSON.parse((await cli(["types", "--url", baseUrl, "--kind", "symbol", "--json"])).out) as Array<{ name: string }>;
+    expect(symbols.map((t) => t.name)).toEqual(["BasicPermission"]);
+    expect((await cli(["types", "--url", baseUrl, "--kind", "bogus"])).code).toBe(ExitCode.Usage);
+  });
+
+  it("explains an enum by its values, and a symbol container by its symbols with the permission caveat", async () => {
+    const e = await cli(["explain", "OrderState", "--url", baseUrl], { tty: true });
+    expect(e.out).toContain("OrderState  (Enum)");
+    expect(e.out).toContain("VALUES");
+    expect(e.out).toMatch(/Shipped\s+Shipped/);
+    const s = await cli(["explain", "BasicPermission", "--url", baseUrl], { tty: true });
+    expect(s.out).toContain("SYMBOLS");
+    expect(s.out).toContain("AdminRules");
+    expect(s.err).toContain("a permission you are denied is left out");
+  });
+
+  it("refuses to retrieve a type that is not an entity", async () => {
+    const r = await cli(["get", "OrderState", "1"], { tty: true });
+    expect(r.code).toBe(ExitCode.Usage);
+    expect(r.err).toContain("'OrderState' is an Enum, not an entity");
+  });
+
+  it("auth status and its whoami alias report the application's version", async () => {
+    const status = JSON.parse((await cli(["auth", "status", "--json"])).out) as Record<string, unknown>;
+    expect(status).toMatchObject({ appVersion: "4.2.0.0", appBuildTime: "2026-10-01T08:00:00.0000000Z" });
+    const whoami = await cli(["auth", "whoami"], { tty: true });
+    expect(whoami.code).toBe(ExitCode.Ok);
+    expect(whoami.out).toContain("App version   4.2.0.0 (built 2026-10-01T08:00:00.0000000Z)");
+  });
+
+  it("version names the target's application version", async () => {
+    const r = await cli(["version", "--url", baseUrl], { tty: true });
+    expect(r.out).toContain("app 4.2.0.0");
+  });
+});
+
+/**
+ * Every exit code an m1 command can produce, end to end (REQ-051, REQ-052, STORY-08). Codes 4 and 7
+ * were defined and mapped but never asserted, so a regression in either would have shipped.
+ */
+describe("error mapping end to end (REQ-051, REQ-052)", () => {
+  it("a permission denial is exit 4, names what was denied, and says not to retry (AC-08.2/08.4, AC-63.6)", async () => {
+    const r = await cli(["get", "Order", "403"], { tty: true });
+    expect(r.code).toBe(ExitCode.NotAuthorized);
+    expect(r.err).toContain("Not authorized to retrieve 'Orders'");
+    expect(r.err).toContain("retrying will not help");
+  });
+
+  it("a token that stopped working is exit 3 and repeats the handoff steps (AC-12.11)", async () => {
+    const r = await cli(["get", "Order", "419"], { tty: true });
+    expect(r.code).toBe(ExitCode.NotAuthenticated);
+    expect(r.err).toContain("fresh browser handoff is required");
+    expect(r.err).toContain('sessionStorage.getItem("authToken")');
+    expect(r.err).toContain(`signum auth login --url ${baseUrl}`);
+    // Neither exists on the target application, so neither may be offered (AC-12.7, AC-12.11).
+    expect(r.err.toLowerCase()).not.toContain("password");
+    expect(r.err.toLowerCase()).not.toContain("api key");
+  });
+
+  it("a concurrency conflict is exit 7 with refetch-and-retry advice, not a generic 500 (AC-33.x)", async () => {
+    const r = await cli(["get", "Order", "409"], { tty: true });
+    expect(r.code).toBe(ExitCode.Concurrency);
+    expect(r.err).toContain("changed since you read it");
+    expect(r.err).not.toContain("server error");
+  });
+
+  it("a 401 is reported as an anomaly that names a proxy, never relied on (AC-08.1)", async () => {
+    const r = await cli(["get", "Order", "401"], { tty: true });
+    expect(r.code).toBe(ExitCode.NotAuthenticated);
+    expect(r.err).toContain("unexpected 401");
+    expect(r.err).toContain("proxy");
+  });
+
+  it("totals say they cover only the rows visible to the caller (AC-08.6)", async () => {
+    const help = await cli(["query", "--help"], { tty: true });
+    expect(help.out).toContain("only the rows your permissions allow");
+  });
+});
+
+describe("a credential never travels inside a URL (REQ-074)", () => {
+  for (const [label, argv, env] of [
+    ["--url", ["types", "--url", "https://user:secret@app.example", "-v"], {}],
+    ["SIGNUM_URL", ["types", "-v"], { SIGNUM_URL: "https://user:secret@app.example" }],
+  ] as const) {
+    it(`is refused from ${label}, before any request, without repeating it`, async () => {
+      const r = await cli([...argv], { env: { ...env } });
+      expect(r.code).toBe(ExitCode.Usage);
+      expect(r.err).toContain("contains a user name or password");
+      expect(r.err + r.out).not.toContain("secret");
+      expect(r.err).not.toContain("> GET");
+    });
+  }
+});
+
+describe("a failed re-login keeps the working credential (AC-12.10)", () => {
+  it("validates the new token before replacing the stored one", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "signum-relogin-"));
+    const env = { SIGNUM_CONFIG_DIR: dir };
+    expect((await cli(["auth", "login", "--url", baseUrl], { env, stdin: GOOD_TOKEN })).code).toBe(ExitCode.Ok);
+    const bad = await cli(["auth", "login", "--url", baseUrl], { env, stdin: "not-a-real-token" });
+    expect(bad.code).toBe(ExitCode.NotAuthenticated);
+    expect(loadCredential(baseUrl, env as unknown as NodeJS.ProcessEnv)!.credential.token).toBe(GOOD_TOKEN);
+    expect((await cli(["auth", "status", "--json"], { env })).code).toBe(ExitCode.Ok);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 

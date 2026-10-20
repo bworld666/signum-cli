@@ -9,29 +9,33 @@ import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, NotFoundError, UsageError } from "../core/errors.ts";
 import { renderDocument } from "../core/output.ts";
 import {
-  addInstance, instancesPath, listInstances, removeInstance, slugFromUrl, validateSlug, validateUrl,
+  addInstance, instancesPath, listInstances, removeInstance, validateSlug, validateUrl,
 } from "../core/instances.ts";
 
 function isJson(ctx: Ctx): ctx is Ctx & { format: "json" | "ndjson" } {
   return ctx.format === "json" || ctx.format === "ndjson";
 }
 
+/**
+ * The name is always given, never derived from the URL. A derived name is a guess the user did not
+ * make: two applications on one host label collide, and a name nobody chose is the one `-i` will
+ * later send production commands to.
+ */
 function add(ctx: Ctx): ExitCode {
-  const [, rawUrl, rawSlug] = ctx.args.positionals;
-  if (rawUrl === undefined) {
-    throw new UsageError("`instance add` needs a URL", {
-      hint: "signum instance add https://renew.example.org/home          (name: renew)\n" +
-            "signum instance add https://app.example.org/home renew",
-    });
+  const [, rawSlug, rawUrl] = ctx.args.positionals;
+  const usage = "signum instance add <name> <url>\n  e.g. signum instance add renew https://renew.example.org";
+  const looksLikeUrl = (v: string | undefined) => v !== undefined && /^[a-z][a-z0-9+.-]*:\/\//i.test(v);
+  if (looksLikeUrl(rawSlug) && rawUrl === undefined) {
+    throw new UsageError("`instance add` needs a name before the URL", { hint: usage });
+  }
+  if (looksLikeUrl(rawSlug) && !looksLikeUrl(rawUrl)) {
+    throw new UsageError("`instance add` takes the name first, then the URL", { hint: usage });
+  }
+  if (rawSlug === undefined || rawUrl === undefined) {
+    throw new UsageError("`instance add` needs a name and a URL", { hint: usage });
   }
   const url = validateUrl(rawUrl);
-  const derived = rawSlug ?? slugFromUrl(url);
-  if (derived === undefined) {
-    throw new UsageError(`cannot derive a name from '${rawUrl}'`, {
-      hint: `Name it explicitly: signum instance add ${rawUrl} <name>`,
-    });
-  }
-  const added = addInstance(validateSlug(derived), url, ctx.io.env);
+  const added = addInstance(validateSlug(rawSlug), url, ctx.io.env);
 
   if (isJson(ctx)) {
     renderDocument(added, { format: ctx.format, write: ctx.io.out });
@@ -51,7 +55,7 @@ function list(ctx: Ctx): ExitCode {
   if (all.length === 0) {
     // Empty is the normal first state, not an error.
     ctx.io.err("no instances registered\n");
-    ctx.io.err("Add one with: signum instance add <url> [name]\n");
+    ctx.io.err("Add one with: signum instance add <name> <url>\n");
     return ExitCode.Ok;
   }
   const w = Math.max(...all.map((i) => i.slug.length));

@@ -102,8 +102,17 @@ export const COMMANDS: CommandSpec[] = [
         summary: "Show whether you are authenticated, as whom, against what",
         usage: "signum auth status",
         milestone: "m1",
-        description: "The first thing to run when something is not working. Never prints a token.",
+        description:
+          "The first thing to run when something is not working: reachability, the target, where the " +
+          "credential comes from, who you are, and the application's version. Never prints a token.",
         examples: ["signum auth status", "signum auth status --json"],
+      },
+      {
+        name: "whoami",
+        summary: "Same as `auth status`",
+        usage: "signum auth whoami",
+        milestone: "m1",
+        examples: ["signum auth whoami"],
       },
       {
         // Implemented in runAuth since m1 but never declared here, so it was absent from
@@ -125,10 +134,16 @@ export const COMMANDS: CommandSpec[] = [
   },
   {
     name: "types",
-    summary: "List the entity types the application exposes",
-    usage: "signum types [<pattern>]",
+    summary: "List the types the application exposes: entities, enums, symbols",
+    usage: "signum types [<pattern>] [--kind <kind>]",
     milestone: "m1",
-    examples: ["signum types", "signum types order --json"],
+    description:
+      "Reflection lists more than entities: enums, messages, queries and symbol containers " +
+      "(operations and permissions are symbols). `signum explain <Type>` shows an enum's values " +
+      "or a container's symbols. Permission containers are not marked as such by the server; " +
+      "where Signum.Authorization is installed, a permission you are denied is left out.",
+    flags: [{ name: "kind", arg: "<kind>", summary: "Only this kind: entity, enum, message, query, symbol" }],
+    examples: ["signum types", "signum types order --json", "signum types --kind enum", "signum types --kind symbol"],
   },
   {
     name: "queries",
@@ -178,6 +193,10 @@ export const COMMANDS: CommandSpec[] = [
     summary: "Run a dynamic query",
     usage: "signum query <queryKey> [--filter <expr>] [--column <token>] [--order <token>]",
     milestone: "m1",
+    description:
+      "Results, totals and --count include only the rows your permissions allow. The server " +
+      "removes the others silently and the response carries no marker that it did, so a result " +
+      "is complete for you, not necessarily for the database (AC-08.6).",
     flags: [
       { name: "filter", arg: "<expr>", summary: "Filter expression; repeatable (AND). See `signum help filter`" },
       { name: "filter-json", arg: "<file|@file|->", summary: "Raw FilterTS[] JSON; combines with --filter (AND)" },
@@ -189,6 +208,8 @@ export const COMMANDS: CommandSpec[] = [
       { name: "all", summary: "Fetch every row, unbounded — only one of --top/--page/--all at a time" },
       { name: "group", summary: "Set groupResults; required for aggregate tokens (Total.Sum, …)" },
       { name: "count", summary: "Return only the row count" },
+      { name: "lites", summary: "Return matching entity references (api/query/lites); --top/--all set the count" },
+      { name: "entities", summary: "Return matching whole entities (api/query/entities); json or ndjson" },
       { name: "resolve", summary: "Show entity columns by name instead of Type;id (adds .ToString)" },
       { name: "as-command", summary: "Print the command for a human to run; emit no data (REQ-078)" },
     ],
@@ -197,6 +218,8 @@ export const COMMANDS: CommandSpec[] = [
       'signum query Order --filter "Entity.Customer.Name ~ Acme" -o csv',
       'signum query Order --filter "State in Shipped,Delivered"',
       "signum query Order --count",
+      'signum query Order --filter "State = Shipped" --lites --top 10',
+      "signum query Order --entities --top 5 --json",
       "signum query Order --resolve --top 20",
       'signum query Order --filter "State = Shipped" --as-command',
     ],
@@ -313,23 +336,23 @@ export const COMMANDS: CommandSpec[] = [
     usage: "signum instance <add|list|remove|path>",
     milestone: "m2",
     description:
-      "A registered name stands in for --url anywhere: `signum -i renew types`. The name defaults " +
-      "to the URL's first host label (https://renew.example.org/home → renew).\n\n" +
+      "A registered name stands in for --url anywhere: `signum -i renew types`. The name is always " +
+      "yours to choose; it is never derived from the URL.\n\n" +
       "Names are stored in instances.json in the config directory, owner-only. A stored login " +
       "is still matched by URL, so -i reaches it exactly when --url with the same address would. " +
       "Nothing here touches the network.",
     examples: [
-      "signum instance add https://renew.example.org/home",
-      "signum instance add https://app.example.org staging",
+      "signum instance add renew https://renew.example.org",
+      "signum instance add staging https://staging.example.org",
       "signum instance list",
     ],
     subcommands: [
       {
         name: "add",
-        summary: "Register a URL under a name (default: its first host label)",
-        usage: "signum instance add <url> [name]",
+        summary: "Register a URL under a name you choose",
+        usage: "signum instance add <name> <url>",
         milestone: "m2",
-        examples: ["signum instance add https://renew.example.org/home", "signum instance add http://localhost:5000 local"],
+        examples: ["signum instance add renew https://renew.example.org", "signum instance add local http://localhost:5000"],
       },
       {
         name: "list",

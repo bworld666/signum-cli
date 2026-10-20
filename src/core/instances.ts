@@ -56,20 +56,6 @@ export function listInstances(env?: NodeJS.ProcessEnv): Instance[] {
     .sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
-/** The URL's first host label, e.g. `https://renew.example.org/home` → `renew`. */
-export function slugFromUrl(url: string): string | undefined {
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    return undefined;
-  }
-  // An IP address has no meaningful first label; `127` names nothing.
-  if (/^[\d.]+$/.test(host) || host.includes(":")) return undefined;
-  const first = host.split(".")[0] ?? "";
-  return SLUG.test(first) ? first : undefined;
-}
-
 export function validateSlug(slug: string): string {
   const s = slug.toLowerCase();
   if (!SLUG.test(s)) {
@@ -91,13 +77,31 @@ export function validateUrl(url: string): string {
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     throw new UsageError(`unsupported scheme '${parsed.protocol}' in '${url}'`, { hint: "Use an http or https URL." });
   }
+  assertNoUserInfo(url);
+  return normalizeUrl(url);
+}
+
+/**
+ * Refuse a URL that carries a user name or password (REQ-074).
+ *
+ * Every target URL is printed somewhere — `-v` traces, `--explain`, error messages, `instance list`
+ * — so a credential inside one would leak through all of them. The message never repeats the URL.
+ * An unparseable URL is left to the code that uses it.
+ */
+export function assertNoUserInfo(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return;
+  }
   if (parsed.username !== "" || parsed.password !== "") {
-    // A credential in the URL would be stored in plain text and echoed by `instance list`.
-    throw new UsageError("the URL contains a user name or password", {
-      hint: "Store the address only, then run `signum auth login -i <name> --with-token`.",
+    throw new UsageError("the target URL contains a user name or password", {
+      hint:
+        "Credentials never go in a URL: it is printed by traces, --explain and error messages.\n" +
+        "Give the address only, then run `signum auth login --url <address>`.",
     });
   }
-  return normalizeUrl(url);
 }
 
 export function addInstance(slug: string, url: string, env?: NodeJS.ProcessEnv): Instance {
@@ -130,7 +134,7 @@ export function resolveInstance(slug: string, env?: NodeJS.ProcessEnv): string {
   const near = nearest(slug.toLowerCase(), all.map((i) => i.slug));
   throw new UsageError(`unknown instance '${slug}'`, {
     hint: all.length === 0
-      ? "No instances are registered. Add one with `signum instance add <url> [name]`."
+      ? "No instances are registered. Add one with `signum instance add <name> <url>`."
       : (near !== undefined ? `Did you mean '${near}'? ` : "") +
         `Registered: ${all.map((i) => i.slug).join(", ")}. See \`signum instance list\`.`,
   });
