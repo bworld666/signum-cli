@@ -1464,9 +1464,10 @@ describe("get (STORY-30)", () => {
     // `name` matched the heuristic and was replaced...
     expect(doc["name"]).not.toBe("Acme GmbH");
     expect(String(doc["name"])).toMatch(/-[0-9a-f]{4}$/);
-    // ...while structural keys survive untouched. Replacing Type/id/ticks would corrupt the
-    // document and break the round-trip invariants REQ-031 depends on.
-    expect(doc["id"]).toBe(42);
+    // ...while structural keys survive untouched. Replacing Type/ticks would corrupt the document
+    // and break the round-trip invariants REQ-031 depends on. The id is the record's identity, so it
+    // is a handle — one `get` accepts back.
+    expect(String(doc["id"])).toStartWith("ref_");
     expect(doc["Type"]).toBe("Order");
     expect(doc["ticks"]).toBe("638");
   });
@@ -1781,6 +1782,69 @@ describe("ref: handles, end to end (REQ-058)", () => {
     expect(g.code).toBe(ExitCode.Ok);
     expect((JSON.parse(g.out) as Record<string, unknown>)["id"]).toBe(42);
     rmSync(d, { recursive: true, force: true });
+  });
+
+  /**
+   * The id behind a handle is exactly what the handle hides. Each of these outputs used to spell it
+   * out: the document's own `id`, the `--exists` answer, the `--explain` URL and the not-found error.
+   */
+  describe("never reveals the id a handle resolved to", () => {
+    const agent = (d: string) => ({ env: { SIGNUM_CONFIG_DIR: d, CLAUDECODE: "1" } });
+    function withHandles(): string {
+      const d = profile();
+      saveHandles({ "ref_aaaaaaaaaaaa": "Order;42", "ref_bbbbbbbbbbbb": "Order;999" }, { SIGNUM_CONFIG_DIR: d } as unknown as NodeJS.ProcessEnv);
+      return d;
+    }
+
+    it("in the document: its id is the record's handle, the one query mints", async () => {
+      const d = profile();
+      const q = await cli(["query", "Order", "--pseudonymize", "strict", "--json"], agent(d));
+      const handle = String((JSON.parse(q.out) as Array<Record<string, unknown>>)[0]?.["Entity"]);
+      const g = await cli(["get", handle, "--json"], agent(d));
+      expect(g.code).toBe(ExitCode.Ok);
+      expect((JSON.parse(g.out) as Record<string, unknown>)["id"]).toBe(handle);
+      expect(g.out).not.toContain("42");
+      rmSync(d, { recursive: true, force: true });
+    });
+
+    it("in --exists", async () => {
+      const d = withHandles();
+      const r = await cli(["get", "ref_aaaaaaaaaaaa", "--exists", "--json"], agent(d));
+      expect(r.code).toBe(ExitCode.Ok);
+      expect(JSON.parse(r.out)).toEqual({ type: "Order", id: "ref_aaaaaaaaaaaa", exists: true });
+      rmSync(d, { recursive: true, force: true });
+    });
+
+    it("in --explain", async () => {
+      const d = withHandles();
+      const r = await cli(["get", "ref_aaaaaaaaaaaa", "--explain"], agent(d));
+      expect(r.code).toBe(ExitCode.Ok);
+      expect(r.out).toContain("/api/entity/Order/ref_aaaaaaaaaaaa");
+      expect(r.out).not.toContain("/42");
+      rmSync(d, { recursive: true, force: true });
+    });
+
+    it("in --explain, whatever characters the id holds", async () => {
+      // A string key with regex characters: substituting the id by pattern missed it and printed it.
+      const d = profile();
+      saveHandles({ "ref_cccccccccccc": "Order;a(b).c*" }, { SIGNUM_CONFIG_DIR: d } as unknown as NodeJS.ProcessEnv);
+      for (const extra of [[], ["--exists"]]) {
+        const r = await cli(["get", "ref_cccccccccccc", "--explain", ...extra], agent(d));
+        expect(r.code).toBe(ExitCode.Ok);
+        expect(r.out).toContain("/Order/ref_cccccccccccc");
+        expect(r.out).not.toContain("a(b)");
+      }
+      rmSync(d, { recursive: true, force: true });
+    });
+
+    it("in a not-found error", async () => {
+      const d = withHandles();
+      const r = await cli(["get", "ref_bbbbbbbbbbbb"], agent(d));
+      expect(r.code).toBe(ExitCode.NotFound);
+      expect(r.err).toContain("ref_bbbbbbbbbbbb not found");
+      expect(r.err).not.toContain("999");
+      rmSync(d, { recursive: true, force: true });
+    });
   });
 
   it("an unknown handle fails locally and is NEVER sent (AC-53.5)", async () => {

@@ -42,7 +42,8 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
   // AC-53.2: a `ref:` handle is accepted wherever a Lite is, and resolved LOCALLY — the handle
   // itself must never reach the server, and an unresolvable one must fail here rather than be
   // forwarded as a literal string that might 404 confusingly or, worse, match something (AC-53.5).
-  const subject = isHandle(first) ? resolveHandle(first, loadHandles(ctx.io.env)) : first;
+  const viaHandle = isHandle(first);
+  const subject = viaHandle ? resolveHandle(first, loadHandles(ctx.io.env)) : first;
 
   const lite = parseLiteKey(subject);
   const typeName = lite?.type ?? subject;
@@ -85,9 +86,10 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
   // The server addresses entities by clean name (`RoleEntity` → `Role`) (AC-30.4).
   const cleanName = type.name.replace(/Entity$/, "");
   const existsOnly = flag(ctx, "exists");
-  const path = existsOnly
-    ? `api/exists/${encodeURIComponent(cleanName)}/${encodeURIComponent(id)}`
-    : entityPath(cleanName, id);
+  const pathFor = (key: string): string => existsOnly
+    ? `api/exists/${encodeURIComponent(cleanName)}/${encodeURIComponent(key)}`
+    : entityPath(cleanName, key);
+  const path = pathFor(id);
 
   if (flag(ctx, "as-command")) {
     emitCommandEcho(ctx); // REQ-078 — see the note in query.ts
@@ -95,7 +97,10 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
   }
 
   if (ctx.args.flags.explain) {
-    renderDocument({ method: "GET", url: `${target.url}/${path}` },
+    // Behind a handle the path would spell out the real id, so show the handle in its place. Built,
+    // not substituted: a pattern made from the id misses when the id holds a regex character.
+    const shown = viaHandle ? pathFor(first) : path;
+    renderDocument({ method: "GET", url: `${target.url}/${shown}`, ...(viaHandle ? { id: "resolved locally from the handle" } : {}) },
       { format: ctx.format === "table" ? "json" : ctx.format, write: ctx.io.out });
     return ExitCode.Ok;
   }
@@ -105,7 +110,8 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
     const present = res.body === true || res.body === "true";
     const out = ctx.openData(dataKind);
     if (ctx.format === "json" || ctx.format === "ndjson") {
-      renderDataDocument({ type: cleanName, id, exists: present }, { format: ctx.format, write: out });
+      // The caller named the record by handle, so the answer does too — never the id behind it.
+      renderDataDocument({ type: cleanName, id: viaHandle ? first : id, exists: present }, { format: ctx.format, write: out });
     } else if (present) {
       out("exists\n");
     } else {
@@ -114,7 +120,11 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
     return present ? ExitCode.Ok : ExitCode.NotFound;
   }
 
-  const body = await fetchEntity(target.http, cleanName, id);
+  const body = await fetchEntity(target.http, cleanName, id).catch((err: unknown) => {
+    // A not-found names the id it looked up; behind a handle that is the identity being protected.
+    if (viaHandle && err instanceof NotFoundError) throw new NotFoundError(`${first} not found`, err.hint !== undefined ? { hint: err.hint } : {});
+    throw err;
+  });
 
   // An entity is a document, not a table, so it renders as JSON in every format — and it is
   // pseudonymized by member name rather than by column (REQ-057). Without this the m2 gate change
