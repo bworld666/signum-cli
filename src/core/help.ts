@@ -178,6 +178,10 @@ export const COMMANDS: CommandSpec[] = [
     summary: "Run a dynamic query",
     usage: "signum query <queryKey> [--filter <expr>] [--column <token>] [--order <token>]",
     milestone: "m1",
+    description:
+      "Results, totals and --count include only the rows your permissions allow. The server " +
+      "removes the others silently and the response carries no marker that it did, so a result " +
+      "is complete for you, not necessarily for the database (AC-08.6).",
     flags: [
       { name: "filter", arg: "<expr>", summary: "Filter expression; repeatable (AND). See `signum help filter`" },
       { name: "filter-json", arg: "<file|@file|->", summary: "Raw FilterTS[] JSON; combines with --filter (AND)" },

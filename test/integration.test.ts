@@ -375,6 +375,28 @@ beforeAll(() => {
           { status: 403, headers },
         );
       }
+      // m1 error mapping (REQ-051/052): one route per server answer an m1 command can meet.
+      if (url.pathname === "/api/entity/Order/403") {
+        return new Response(JSON.stringify({
+          exceptionType: "System.UnauthorizedAccessException",
+          exceptionMessage: "Not authorized to retrieve 'Orders'", // AuthMessage.NotAuthorizedToRetrieve0 (AuthMessages.cs:130)
+        }), { status: 403, headers });
+      }
+      if (url.pathname === "/api/entity/Order/419") {
+        return new Response(JSON.stringify({
+          exceptionType: "Signum.Engine.Authorization.AuthenticationException",
+          exceptionMessage: "The token is no longer valid",
+        }), { status: 403, headers });
+      }
+      if (url.pathname === "/api/entity/Order/409") {
+        return new Response(JSON.stringify({
+          exceptionType: "Signum.Engine.ConcurrencyException",
+          exceptionMessage: "Concurrency error: Order 409 was modified",
+        }), { status: 500, headers });
+      }
+      if (url.pathname === "/api/entity/Order/401") {
+        return new Response("Unauthorized", { status: 401 });
+      }
       if (url.pathname === "/api/entity/Order/400") {
         return new Response(JSON.stringify({ title: "bad request" }), { status: 400, headers });
       }
@@ -2356,6 +2378,77 @@ describe("named instances (REQ-001)", () => {
     expect((await cli(["instance", "remove", "local"], { env })).code).toBe(ExitCode.NotFound);
     expect(existsSync(join(d, "credential.json"))).toBe(true);
     rmSync(d, { recursive: true, force: true });
+  });
+});
+
+/**
+ * Every exit code an m1 command can produce, end to end (REQ-051, REQ-052, STORY-08). Codes 4 and 7
+ * were defined and mapped but never asserted, so a regression in either would have shipped.
+ */
+describe("error mapping end to end (REQ-051, REQ-052)", () => {
+  it("a permission denial is exit 4, names what was denied, and says not to retry (AC-08.2/08.4, AC-63.6)", async () => {
+    const r = await cli(["get", "Order", "403"], { tty: true });
+    expect(r.code).toBe(ExitCode.NotAuthorized);
+    expect(r.err).toContain("Not authorized to retrieve 'Orders'");
+    expect(r.err).toContain("retrying will not help");
+  });
+
+  it("a token that stopped working is exit 3 and repeats the handoff steps (AC-12.11)", async () => {
+    const r = await cli(["get", "Order", "419"], { tty: true });
+    expect(r.code).toBe(ExitCode.NotAuthenticated);
+    expect(r.err).toContain("fresh browser handoff is required");
+    expect(r.err).toContain('sessionStorage.getItem("authToken")');
+    expect(r.err).toContain(`signum auth login --url ${baseUrl}`);
+    // Neither exists on the target application, so neither may be offered (AC-12.7, AC-12.11).
+    expect(r.err.toLowerCase()).not.toContain("password");
+    expect(r.err.toLowerCase()).not.toContain("api key");
+  });
+
+  it("a concurrency conflict is exit 7 with refetch-and-retry advice, not a generic 500 (AC-33.x)", async () => {
+    const r = await cli(["get", "Order", "409"], { tty: true });
+    expect(r.code).toBe(ExitCode.Concurrency);
+    expect(r.err).toContain("changed since you read it");
+    expect(r.err).not.toContain("server error");
+  });
+
+  it("a 401 is reported as an anomaly that names a proxy, never relied on (AC-08.1)", async () => {
+    const r = await cli(["get", "Order", "401"], { tty: true });
+    expect(r.code).toBe(ExitCode.NotAuthenticated);
+    expect(r.err).toContain("unexpected 401");
+    expect(r.err).toContain("proxy");
+  });
+
+  it("totals say they cover only the rows visible to the caller (AC-08.6)", async () => {
+    const help = await cli(["query", "--help"], { tty: true });
+    expect(help.out).toContain("only the rows your permissions allow");
+  });
+});
+
+describe("a credential never travels inside a URL (REQ-074)", () => {
+  for (const [label, argv, env] of [
+    ["--url", ["types", "--url", "https://user:secret@app.example", "-v"], {}],
+    ["SIGNUM_URL", ["types", "-v"], { SIGNUM_URL: "https://user:secret@app.example" }],
+  ] as const) {
+    it(`is refused from ${label}, before any request, without repeating it`, async () => {
+      const r = await cli([...argv], { env: { ...env } });
+      expect(r.code).toBe(ExitCode.Usage);
+      expect(r.err).toContain("contains a user name or password");
+      expect(r.err + r.out).not.toContain("secret");
+      expect(r.err).not.toContain("> GET");
+    });
+  }
+});
+
+describe("a failed re-login keeps the working credential (AC-12.10)", () => {
+  it("validates the new token before replacing the stored one", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "signum-relogin-"));
+    const env = { SIGNUM_CONFIG_DIR: dir };
+    expect((await cli(["auth", "login", "--url", baseUrl], { env, stdin: GOOD_TOKEN })).code).toBe(ExitCode.Ok);
+    const bad = await cli(["auth", "login", "--url", baseUrl], { env, stdin: "not-a-real-token" });
+    expect(bad.code).toBe(ExitCode.NotAuthenticated);
+    expect(loadCredential(baseUrl, env as unknown as NodeJS.ProcessEnv)!.credential.token).toBe(GOOD_TOKEN);
+    expect((await cli(["auth", "status", "--json"], { env })).code).toBe(ExitCode.Ok);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 

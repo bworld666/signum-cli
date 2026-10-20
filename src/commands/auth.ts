@@ -16,16 +16,10 @@ import {
 import { SignumHttp } from "../core/http.ts";
 import { flag } from "../core/ctx.ts";
 import { resolveTarget } from "../core/target.ts";
+import { handoffInstructions } from "../core/handoff.ts";
 
 /** Generic form, for error hints where no target URL is known (`auth status` on a fresh install). */
-const HANDOFF_INSTRUCTIONS = [
-  "To obtain a token:",
-  "  1. Sign in to the web application in your browser.",
-  '  2. Open the browser console and run:  sessionStorage.getItem("authToken")',
-  "  3. Pipe the value in:",
-  "       signum auth login --url <url> < token.txt",
-  '       printf %s "$TOKEN" | signum auth login --url <url>',
-].join("\n");
+const HANDOFF_INSTRUCTIONS = handoffInstructions();
 
 /**
  * The interactive preamble, shaped after `aws login --remote`.

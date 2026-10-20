@@ -18,6 +18,7 @@ import {
 } from "./errors.ts";
 import { rotateCredential } from "./credentials.ts";
 import { parseLossless } from "./json.ts";
+import { handoffInstructions } from "./handoff.ts";
 
 export const REDACTED = "<redacted>";
 
@@ -234,8 +235,13 @@ export class SignumHttp {
     if (status === 403) {
       // 403 covers BOTH cases; exceptionType is the only discriminator (AC-08.2).
       if (type.includes("AuthenticationException")) {
+        // AC-12.11: a token that stopped working needs a fresh browser handoff, and saying only
+        // "re-run login" leaves the user to rediscover how to obtain one.
         return new NotAuthenticatedError(`not authenticated: ${message}`, {
-          hint: "Your token may be invalid or superseded. Re-run `signum auth login --with-token`.",
+          hint:
+            "The token is no longer accepted, so a fresh browser handoff is required.\n" +
+            "(If it came from SIGNUM_TOKEN, replace the variable's value instead.)\n\n" +
+            handoffInstructions(this.opts.baseUrl),
         });
       }
       if (type.includes("UnauthorizedAccessException")) {
