@@ -21,7 +21,7 @@ import { runQuery } from "./commands/query.ts";
 import { runGet } from "./commands/get.ts";
 import { runCache } from "./commands/cache.ts";
 import { runInstance } from "./commands/instance.ts";
-import { resolveInstance } from "./core/instances.ts";
+import { assertNoUserInfo, resolveInstance } from "./core/instances.ts";
 import { runUnmask } from "./commands/unmask.ts";
 import type { Ctx, Io } from "./core/ctx.ts";
 
@@ -133,6 +133,8 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitCode> {
 
   // After help, which must not read configuration (AC-60.2); before any command reads `url`.
   if (args.flags.instance !== undefined) args.flags.url = resolveInstance(args.flags.instance, io.env);
+  // --url, SIGNUM_URL and a registered instance alike: a credential in the URL leaks everywhere.
+  if (args.flags.url !== undefined) assertNoUserInfo(args.flags.url);
 
   const privacy = resolvePolicy({
     callerIsAgent: caller.context === "agent",

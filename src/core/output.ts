@@ -109,7 +109,7 @@ function flatCell(v: unknown, isEntityColumn: boolean): string {
 }
 
 /** Lite keys are `TypeName;id`; `-o name` emits them bare for piping. */
-function liteKey(entity: unknown): string | undefined {
+export function liteKey(entity: unknown): string | undefined {
   if (entity === null || typeof entity !== "object") return undefined;
   const e = entity as Record<string, unknown>;
   const type = e["EntityType"] ?? e["Type"];

@@ -167,6 +167,20 @@ entity kinds, operations, queries, enums, permissions, and localized strings. Ca
 disk keyed by `Last-Modified` and revalidate with `If-Modified-Since` — that gives fully
 offline tab-completion and pre-flight validation.
 
+> **`kind` is not the entity kind.** `TypeInfoTS.Kind` is `KindOfType` — `Entity`, `Enum`,
+> `Message`, `Query` or `SymbolContainer` (`ReflectionServer.cs:629-636`), serialized as a string
+> (`SignumServer.cs:48`). The entity kind (`Main`, `Part`, …) is the separate `entityKind`
+> (`:469`). Only `kind: "Entity"` names something a member can reference: an enum-typed member is
+> not an identity. An enum's `members` are its values (`:331-360`); a symbol container's are its
+> symbols (`:363-386`). Permission containers are not marked as such; under Signum.Authorization a
+> `PermissionSymbol` the caller is denied is dropped from reflection (`AuthServer.cs:306-320`), and
+> no core endpoint lists the caller's permissions.
+
+> **The application's version rides on every MVC action response.** `VersionFilterAttribute` is a
+> default filter (`SignumServer.cs:70`) and adds `X-App-Version` (entry assembly version) and
+> `X-App-BuildTime` (ISO-8601 UTC) (`VersionFilterAttribute.cs:20-26`). Not added when the response
+> has already started, so treat both as optional. ✅ verified against framework source, 728d981.
+
 > **The document is anonymous-*accessible* but not identity-*independent*.** Anonymous means no
 > credential is *required*; the response still differs by caller. `AuthServer.cs:143-157`
 > rewrites `TypeInfoTS.QueryDefined` to `false` for any query the caller may not run, and
@@ -206,9 +220,15 @@ offline tab-completion and pre-flight validation.
 | POST | `api/query/parseTokens` | `{queryKey, tokens[]}` → `QueryTokenTS[]` |
 | POST | `api/query/subTokens` | `{queryKey, token}` → `QueryTokenTS[]` — completion |
 | POST | `api/query/executeQuery/{queryKey}` | `QueryRequestTS` → `ResultTable` |
-| POST | `api/query/lites/{queryKey}` | → `Lite[]` |
-| POST | `api/query/entities/{queryKey}` | → `Entity[]` |
+| POST | `api/query/lites/{queryKey}` | `QueryEntitiesRequestTS` → `Lite[]` (`signum query --lites`) |
+| POST | `api/query/entities/{queryKey}` | `QueryEntitiesRequestTS` → `Entity[]` (`signum query --entities`) |
 | POST | `api/query/queryValue/{queryKey}` | → scalar |
+
+> **`QueryEntitiesRequestTS`** is `{queryKey, filters, orders, count?}` (`FilterJsonConverter.cs:275-280`,
+> `QueryController.cs:104-114`). `filters` and `orders` are `required` — send `[]`, not nothing; `count`
+> is optional and absent means unbounded. The body's `queryKey` must equal the route's, or the
+> server throws. There are no columns, no grouping and no pagination, and filters are parsed with
+> `canAggregate: false`. ✅ verified against framework source, 728d981.
 
 `QueryRequestTS` = `{ queryKey, groupResults, filters, orders, columns, pagination, systemTime? }`.
 

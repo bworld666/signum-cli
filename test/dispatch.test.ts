@@ -189,7 +189,7 @@ describe("the data-output boundary cannot be bypassed inside src/", () => {
     // A rounded int64 id names a different record, and its handle would not match the one the
     // other data path mints for the same record. Every request in query.ts renders data; get.ts
     // reads its entity through fetchEntity, which is lossless.
-    const query = await Bun.file("src/commands/query.ts").text();
+    const query = await Bun.file("src/commands/query.ts").text() + await Bun.file("src/commands/query-variants.ts").text();
     const requests = query.match(/http\.request\b/g)?.length ?? 0;
     expect(requests).toBeGreaterThan(0);
     expect(query.match(/lossless: true/g)?.length ?? 0).toBe(requests);

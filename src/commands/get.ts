@@ -7,7 +7,7 @@
 import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, NotFoundError, UsageError } from "../core/errors.ts";
 import { renderDataDocument, renderDocument } from "../core/output.ts";
-import { findType, loadMetadata, suggestTypes } from "../core/metadata.ts";
+import { findType, isEntityTypeInfo, loadMetadata, suggestTypes } from "../core/metadata.ts";
 import { flag } from "../core/ctx.ts";
 import { resolveTarget } from "../core/target.ts";
 import { persistHandles } from "../core/handles.ts";
@@ -80,6 +80,14 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
       hint: near.length > 0
         ? `Did you mean: ${near.join(", ")}?`
         : "Run `signum types` to see what this application exposes.",
+    });
+  }
+
+  // Reflection lists enums and symbol containers too; only an entity can be retrieved. A type with
+  // no kind (an older or hand-written metadata document) is given the benefit of the doubt.
+  if (type.kind !== undefined && !isEntityTypeInfo(type)) {
+    throw new UsageError(`'${type.name}' is ${/^[AEIOU]/.test(type.kind) ? "an" : "a"} ${type.kind}, not an entity, so it cannot be retrieved`, {
+      hint: `Run \`signum explain ${type.name}\` to see its ${type.kind === "SymbolContainer" ? "symbols" : "values"}.`,
     });
   }
 

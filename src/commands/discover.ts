@@ -13,9 +13,9 @@ import { ExitCode, NotFoundError, UsageError } from "../core/errors.ts";
 import { renderDocument } from "../core/output.ts";
 import { isBuiltIn } from "../core/args.ts";
 import {
-  findType, loadMetadata, queryableTypes, suggestTypes, type Metadata, type OperationInfo, type TypeInfo,
+  findType, isEntityTypeInfo, loadMetadata, queryableTypes, suggestTypes, TYPE_KINDS, type Metadata, type OperationInfo, type TypeInfo,
 } from "../core/metadata.ts";
-import { flag } from "../core/ctx.ts";
+import { flag, opt } from "../core/ctx.ts";
 import { resolveTarget } from "../core/target.ts";
 import { sensitivity } from "../core/privacy.ts";
 import { fetchSubTokens, validateTokens, type QueryTokenInfo } from "../core/tokens.ts";
@@ -37,16 +37,37 @@ function noteOrigin(ctx: Ctx, md: Metadata): void {
   }
 }
 
+/** `Entity (Main)`, `Enum`, … — the type's kind as one readable label. */
+function kindLabel(t: TypeInfo): string {
+  if (t.kind === undefined) return t.entityKind ?? "";
+  return t.entityKind !== undefined ? `${t.kind} (${t.entityKind})` : t.kind;
+}
+
+/** What a type's members are, by kind: an enum's are values, a symbol container's are symbols. */
+function memberNoun(t: TypeInfo): string {
+  return t.kind === "Enum" || t.kind === "Message" || t.kind === "Query" ? "values"
+    : t.kind === "SymbolContainer" ? "symbols"
+    : "members";
+}
+
 function listTypes(ctx: Ctx, md: Metadata, pattern: string | undefined): ExitCode {
   const wanted = pattern?.toLowerCase();
+  const kindFlag = opt(ctx, "kind");
+  const kind = kindFlag !== undefined ? TYPE_KINDS[kindFlag.toLowerCase()] : undefined;
+  if (kindFlag !== undefined && kind === undefined) {
+    throw new UsageError(`unknown kind '${kindFlag}'`, {
+      hint: "Valid kinds: entity, enum, message, query, symbol.",
+    });
+  }
   const rows = [...md.types.values()]
     .filter((t) => wanted === undefined || t.name.toLowerCase().includes(wanted))
+    .filter((t) => kind === undefined || t.kind === kind)
     .sort((a, b) => a.name.localeCompare(b.name));
 
   if (ctx.format === "json" || ctx.format === "ndjson") {
     renderDocument(
       rows.map((t) => ({
-        name: t.name, kind: t.kind ?? null, niceName: t.niceName ?? null,
+        name: t.name, kind: t.kind ?? null, entityKind: t.entityKind ?? null, niceName: t.niceName ?? null,
         members: t.members.length, operations: t.operations.length, hasQuery: t.hasQuery,
       })),
       { format: ctx.format, write: ctx.io.out },
@@ -61,7 +82,7 @@ function listTypes(ctx: Ctx, md: Metadata, pattern: string | undefined): ExitCod
 
   const w = Math.max(...rows.map((t) => t.name.length));
   for (const t of rows) {
-    const bits = [t.kind ?? "", `${t.members.length} members`];
+    const bits = [kindLabel(t), `${t.members.length} ${memberNoun(t)}`];
     if (t.operations.length > 0) bits.push(`${t.operations.length} operations`);
     ctx.io.out(`${t.name.padEnd(w)}  ${bits.filter((b) => b !== "").join(", ")}\n`);
   }
@@ -224,7 +245,7 @@ function explainPrivacy(ctx: Ctx, md: Metadata, root: TypeInfo): ExitCode {
     // the function is what keeps introspection honest — it cannot disagree with behaviour if
     // there is only one rule (AC-52.11).
     const c = sensitivity(
-      { name: m.name, memberType: m.type, isEntityType: (t) => findType(md, t) !== undefined },
+      { name: m.name, memberType: m.type, isEntityType: (t) => isEntityTypeInfo(findType(md, t)) },
       ctx.privacy,
     );
 
@@ -273,7 +294,8 @@ async function explainType(ctx: Ctx, root: TypeInfo): Promise<ExitCode> {
 
   if (ctx.format === "json" || ctx.format === "ndjson") {
     renderDocument(
-      { kind: "type", name: root.name, entityKind: root.kind ?? null, niceName: root.niceName ?? null,
+      { kind: "type", name: root.name, typeKind: root.kind ?? null, entityKind: root.entityKind ?? null,
+        niceName: root.niceName ?? null,
         hasQuery: root.hasQuery,
         // `members` is the reflection view, `queryTokens` the query view. Both are named for what
         // they are so a machine consumer cannot mistake one for the other — the whole defect in
@@ -289,9 +311,21 @@ async function explainType(ctx: Ctx, root: TypeInfo): Promise<ExitCode> {
     );
     return ExitCode.Ok;
   }
-  ctx.io.out(`${root.name}${root.kind !== undefined ? `  (${root.kind})` : ""}\n`);
+  ctx.io.out(`${root.name}${kindLabel(root) !== "" ? `  (${kindLabel(root)})` : ""}\n`);
   if (root.niceName !== undefined) ctx.io.out(`  ${root.niceName}\n`);
-  if (root.members.length > 0) {
+  if (root.members.length > 0 && memberNoun(root) !== "members") {
+    // An enum's values and a symbol container's symbols: what a filter or permission names.
+    ctx.io.out(`\n${memberNoun(root).toUpperCase()}\n`);
+    const w = Math.max(...root.members.map((m) => m.name.length));
+    for (const m of root.members) ctx.io.out(`  ${m.name.padEnd(w)}  ${m.niceName ?? ""}\n`.replace(/ +\n$/, "\n"));
+    if (root.kind === "SymbolContainer") {
+      // AuthServer.cs:306-320: a PermissionSymbol the caller is denied is dropped from reflection.
+      ctx.io.err(
+        "\nnote: where Signum.Authorization is installed, a permission you are denied is left out of\n" +
+        "this list, so a permission container shows what YOU may do, not everything that exists.\n",
+      );
+    }
+  } else if (root.members.length > 0) {
     // The header carries the caveat because the header is what a scanning reader reads. Calling
     // this section plain "MEMBERS" is what let it be mistaken for the list of queryable columns.
     ctx.io.out("\nMEMBERS  (reflection view of the entity — not all are query tokens)\n");
