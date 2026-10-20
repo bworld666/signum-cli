@@ -2189,6 +2189,78 @@ describe("--verbose under a detected AI caller (#128)", () => {
   });
 });
 
+/** `-i <name>` stands in for `--url` everywhere, including for the stored credential. */
+describe("named instances (REQ-001)", () => {
+  function profile(): string {
+    const d = mkdtempSync(join(tmpdir(), "signum-e2e-inst-"));
+    writeFileSync(join(d, "credential.json"), readFileSync(join(configDir, "credential.json")));
+    return d;
+  }
+
+  it("registers a URL under a name and targets it with -i", async () => {
+    const d = profile();
+    const env = { SIGNUM_CONFIG_DIR: d };
+    expect((await cli(["instance", "add", baseUrl, "local"], { env })).code).toBe(ExitCode.Ok);
+    const list = await cli(["instance", "list", "--json"], { env });
+    expect(JSON.parse(list.out)).toEqual([{ slug: "local", url: baseUrl }]);
+
+    const viaName = await cli(["types", "-i", "local", "--json"], { env });
+    const viaUrl = await cli(["types", "--url", baseUrl, "--json"], { env });
+    expect(viaName.code).toBe(ExitCode.Ok);
+    expect(viaName.out).toBe(viaUrl.out);
+    rmSync(d, { recursive: true, force: true });
+  });
+
+  it("reaches the stored credential, which is matched by URL", async () => {
+    const d = profile();
+    const env = { SIGNUM_CONFIG_DIR: d };
+    await cli(["instance", "add", baseUrl, "local"], { env });
+    const r = await cli(["get", "Order", "42", "-i", "local", "--json"], { env, tty: true });
+    expect(r.code).toBe(ExitCode.Ok);
+    expect((JSON.parse(r.out) as { id: number }).id).toBe(42);
+    rmSync(d, { recursive: true, force: true });
+  });
+
+  it("asks for a name when the URL has none to derive (an IP address)", async () => {
+    const d = profile();
+    const r = await cli(["instance", "add", baseUrl], { env: { SIGNUM_CONFIG_DIR: d } });
+    expect(r.code).toBe(ExitCode.Usage);
+    expect(r.err).toContain("cannot derive a name");
+    rmSync(d, { recursive: true, force: true });
+  });
+
+  it("an unknown name fails before any request, naming what exists", async () => {
+    const d = profile();
+    const env = { SIGNUM_CONFIG_DIR: d };
+    await cli(["instance", "add", baseUrl, "local"], { env });
+    const r = await cli(["types", "-i", "locl"], { env });
+    expect(r.code).toBe(ExitCode.Usage);
+    expect(r.err).toContain("unknown instance 'locl'");
+    expect(r.err).toContain("Did you mean 'local'?");
+    rmSync(d, { recursive: true, force: true });
+  });
+
+  it("echoes -i, not the URL it resolved to (REQ-078)", async () => {
+    const d = profile();
+    const env = { SIGNUM_CONFIG_DIR: d };
+    await cli(["instance", "add", baseUrl, "local"], { env });
+    const r = await cli(["query", "Order", "-i", "local", "--as-command"], { env });
+    expect(r.code).toBe(ExitCode.Ok);
+    expect(r.out.trim()).toBe("signum query Order -i local");
+    rmSync(d, { recursive: true, force: true });
+  });
+
+  it("remove forgets the name and keeps the login", async () => {
+    const d = profile();
+    const env = { SIGNUM_CONFIG_DIR: d };
+    await cli(["instance", "add", baseUrl, "local"], { env });
+    expect((await cli(["instance", "remove", "local"], { env })).code).toBe(ExitCode.Ok);
+    expect((await cli(["instance", "remove", "local"], { env })).code).toBe(ExitCode.NotFound);
+    expect(existsSync(join(d, "credential.json"))).toBe(true);
+    rmSync(d, { recursive: true, force: true });
+  });
+});
+
 describe("version (previously 0% covered)", () => {
   it("reports the CLI's own version with no target configured", async () => {
     const r = await cli(["version"], { env: { SIGNUM_CONFIG_DIR: mkdtempSync(join(tmpdir(), "signum-ver-")) }, tty: true });
