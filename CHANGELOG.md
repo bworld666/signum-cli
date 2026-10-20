@@ -3,7 +3,7 @@
 Notable changes to signum-cli. Versions are [SemVer](https://semver.org/), and `package.json` is the
 source of truth: a release tag `v<version>` must match it (see the README's release section).
 
-## 0.2.0 — 2026-10-20
+## 0.2.0 — 2026-10-21
 
 The first full release: milestone **m1**, the read-only core. It follows the pre-releases
 `0.1.0-b.1` to `0.1.0-b.5`. Every m1 requirement was run against a live Signum application before
