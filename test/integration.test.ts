@@ -223,6 +223,13 @@ const EXACT_RESULT_TABLE =
   `{"EntityType":"Customer","id":9007199254740995,"model":"Anna Müller"}]}],"totalElements":1}`;
 /** When set, every executeQuery answers with EXACT_RESULT_TABLE. */
 let exactResultTable = false;
+/**
+ * Serve reflection as Signum.Authorization does (AuthServer.cs:70-176).
+ *   full       TypeAuthLogic and QueryAuthLogic: no entity at all to an anonymous caller, and to a
+ *              logged-in one a `Payroll` whose query the role is denied
+ *   queryOnly  QueryAuthLogic alone: every entity to an anonymous caller, every query denied
+ */
+let authorization: "none" | "full" | "queryOnly" = "none";
 
 beforeAll(() => {
   configDir = mkdtempSync(join(tmpdir(), "signum-test-"));
@@ -244,7 +251,20 @@ beforeAll(() => {
 
       // Anonymous — no credential required (AC-61.4).
       if (url.pathname === "/api/reflection/types") {
-        return new Response(JSON.stringify(REFLECTION), {
+        let doc: Record<string, unknown> = REFLECTION;
+        const loggedIn = token === GOOD_TOKEN || token === ROTATED_TOKEN;
+        if (authorization === "full") {
+          doc = loggedIn
+            ? { ...REFLECTION, Payroll: { kind: "Entity", entityKind: "Main", niceName: "Payroll", members: { Id: { type: { name: "number" } } }, operations: {}, queryAllowed: "None", typeAllowed: "Read" } }
+            : Object.fromEntries(Object.entries(REFLECTION).filter(([, t]) => !("entityKind" in t)));
+        } else if (authorization === "queryOnly" && !loggedIn) {
+          doc = Object.fromEntries(Object.entries(REFLECTION).map(([name, t]) => {
+            if (!("queryDefined" in t)) return [name, t];
+            const { queryDefined: _cleared, ...rest } = t as Record<string, unknown>;
+            return [name, { ...rest, queryAllowed: "None" }];
+          }));
+        }
+        return new Response(JSON.stringify(doc), {
           headers: { ...headers, "last-modified": "Wed, 01 Jan 2026 00:00:00 GMT" },
         });
       }
@@ -2232,6 +2252,81 @@ describe("--as-command: emit the invocation, not the data (REQ-078)", () => {
     });
     expect(r.code).toBe(ExitCode.Usage);
     expect(r.err).toContain("--as-command");
+  });
+});
+
+describe("what reflection says about who is asking (REQ-051, AC-61.4)", () => {
+  beforeAll(() => { authorization = "full"; });
+  afterAll(() => { authorization = "none"; });
+  const fresh = (): string => mkdtempSync(join(tmpdir(), "signum-who-"));
+  const loggedIn = (): { env: Record<string, string> } => ({ env: { SIGNUM_CONFIG_DIR: fresh(), SIGNUM_TOKEN: GOOD_TOKEN } });
+  const anonymous = (): { env: Record<string, string> } => ({ env: { SIGNUM_CONFIG_DIR: fresh() } });
+
+  it("a query the role is denied is exit 4, a permission and not a usage error", async () => {
+    const r = await cli(["query", "Payroll", "--url", baseUrl], loggedIn());
+    expect(r.code).toBe(ExitCode.NotAuthorized);
+    expect(r.err).toContain("your role may not run query 'Payroll'");
+    expect(r.err).toContain("retrying will not help");
+  });
+
+  it("a type that defines no query is still a usage error", async () => {
+    expect((await cli(["query", "Ledger", "--url", baseUrl], loggedIn())).code).toBe(ExitCode.Usage);
+  });
+
+  it("explain says the query is denied, and --json carries queryAllowed", async () => {
+    expect((await cli(["explain", "Payroll", "--url", baseUrl], { ...loggedIn(), tty: true })).out).toContain("Your role may not run this type's query");
+    const doc = JSON.parse((await cli(["explain", "Payroll", "--url", baseUrl, "--json"], loggedIn())).out) as { queryAllowed: unknown };
+    expect(doc.queryAllowed).toBe("None");
+  });
+
+  it("anonymously, an entity the view hides is exit 3 with the login command, never 'unknown'", async () => {
+    for (const argv of [["explain", "Order"], ["get", "Order", "1", "--explain"], ["query", "Order", "--explain"], ["operations", "Order"]]) {
+      const r = await cli([...argv, "--url", baseUrl], anonymous());
+      expect(r.code).toBe(ExitCode.NotAuthenticated);
+      expect(r.err).toContain("is not visible without a login");
+      expect(r.err).toContain(`signum auth login --url ${baseUrl}`);
+      expect(r.err).not.toContain("unknown");
+    }
+  });
+
+  it("anonymously, a query denied to everyone is exit 3 with the login command (QueryAuthLogic alone)", async () => {
+    authorization = "queryOnly";
+    try {
+      const r = await cli(["query", "Order", "--explain", "--url", baseUrl], anonymous());
+      expect(r.code).toBe(ExitCode.NotAuthenticated);
+      expect(r.err).toContain("query 'Order' needs a login");
+      expect(r.err).toContain(`Log in and retry: signum auth login --url ${baseUrl}`);
+    } finally {
+      authorization = "full";
+    }
+  });
+
+  it("a login hint raised below the command names the instance the target was given by", async () => {
+    const d = fresh();
+    await cli(["instance", "add", "local", baseUrl], { env: { SIGNUM_CONFIG_DIR: d } });
+    const r = await cli(["explain", "Order", "-i", "local"], { env: { SIGNUM_CONFIG_DIR: d } });
+    expect(r.code).toBe(ExitCode.NotAuthenticated);
+    expect(r.err).toContain("Log in and retry: signum -i local auth login");
+    expect(r.err).not.toContain("--url");
+  });
+
+  it("anonymously, a listing says on stderr what the view leaves out", async () => {
+    const r = await cli(["types", "--url", baseUrl, "--json"], anonymous());
+    expect(r.code).toBe(ExitCode.Ok);
+    expect((JSON.parse(r.out) as unknown[]).length).toBe(3);
+    expect(r.err).toContain("lists 3 types and no entity");
+    expect(r.err).toContain("signum auth login");
+  });
+});
+
+describe("an unknown type gets one answer, whichever command looked it up (AC-63.4)", () => {
+  it("get and explain give the same message and hint", async () => {
+    const get = await cli(["get", "Ordr", "1", "--url", baseUrl, "--explain"]);
+    const explain = await cli(["explain", "Ordr", "--url", baseUrl]);
+    expect(get.code).toBe(ExitCode.NotFound);
+    expect(get.err).toBe(explain.err);
+    expect(get.err).toContain("Did you mean: Order");
+    expect(get.err).toContain("Run `signum types` for the full list.");
   });
 });
 

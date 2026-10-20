@@ -184,7 +184,8 @@ export const COMMANDS: CommandSpec[] = [
     milestone: "m1",
     description:
       "One segment (`signum explain Order`) reads the cached reflection document: no " +
-      "authentication needed, and it works offline.\n\n" +
+      "authentication needed, and it works offline. An application with Signum.Authorization " +
+      "lists no entity to a caller who is not logged in, so there an entity needs a login.\n\n" +
       "A dotted token path (`signum explain Order.Entity.Customer`) is resolved LIVE against the " +
       "query's own description, so it validates the path and lists what may follow it. That call " +
       "DOES need a credential and cannot come from cache — api/query/subTokens is not anonymous, " +
@@ -474,7 +475,7 @@ export function renderOverview(): string {
   out.push(...renderFlags(GLOBAL_FLAGS));
   out.push("");
   out.push("GETTING STARTED");
-  out.push("  signum --url https://app.example types      # explore, no login needed");
+  out.push("  signum --url https://app.example types      # explore; entities may need a login");
   out.push("  signum auth login --url https://app.example    # prompts for the token");
   out.push("  signum auth status                          # who am I, against what");
   out.push("");

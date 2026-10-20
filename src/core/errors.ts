@@ -8,6 +8,8 @@
  * and authorization failures — the discriminator is `exceptionType` (AC-08.2).
  */
 
+import { loginCommand } from "./handoff.ts";
+
 export const ExitCode = {
   Ok: 0,
   Unexpected: 1,
@@ -40,19 +42,39 @@ export const EXIT_CODE_DESCRIPTIONS: Record<ExitCode, string> = {
 export interface CliErrorOptions {
   /** Actionable next step. Shown after the message; this is where help routing lives (STORY-63). */
   hint?: string;
+  /**
+   * A hint built around the login command, in place of `hint`, for an error raised where the
+   * target's URL is known but not how the user named it. It reads `signum auth login --url <url>`
+   * until `run()` calls `namingInstance`, so no module is handed the instance name just to word a
+   * hint (Brooks review of #145).
+   */
+  loginHint?: { url: string | undefined; render: (login: string) => string };
   cause?: unknown;
 }
 
 /** Base for every error the CLI raises deliberately. Anything else exits `Unexpected`. */
 export class CliError extends Error {
   readonly exitCode: ExitCode;
-  readonly hint: string | undefined;
+  readonly #hint: string | undefined;
+  readonly #loginHint: CliErrorOptions["loginHint"];
+  #instance: string | undefined;
 
   constructor(message: string, exitCode: ExitCode, options: CliErrorOptions = {}) {
     super(message, options.cause !== undefined ? { cause: options.cause } : undefined);
     this.name = new.target.name;
     this.exitCode = exitCode;
-    this.hint = options.hint;
+    this.#hint = options.hint;
+    this.#loginHint = options.loginHint;
+  }
+
+  get hint(): string | undefined {
+    const login = this.#loginHint;
+    return login !== undefined ? login.render(loginCommand(login.url, this.#instance)) : this.#hint;
+  }
+
+  /** Word a login hint for a target the user named by instance: `signum -i <name> auth login`. */
+  namingInstance(instance: string | undefined): void {
+    this.#instance = instance;
   }
 }
 

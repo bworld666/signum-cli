@@ -99,7 +99,7 @@ Unset the token first: `unset SIGNUM_TOKEN`.
 |---|---|---|---|
 | 1.1 | `curl -s -o /dev/null -w '%{http_code}\n' "$SIGNUM_URL/api/reflection/types"` | `200`. This is the anonymous-discovery promise (AC-61.4) | — |
 | 1.2 | `curl -s -o /dev/null -w '%{http_code}\n' "$SIGNUM_URL/api/auth/openIDEndpoints"` | **The outstanding probe from ADR 0008.** `404` with 1.1 at `200` ⇒ OpenID module absent, ADR 0008 stands. **Both 404** ⇒ wrong base URL, and OpenID loopback is back on the table | ADR 0008 |
-| 1.3 | `signum types --json \| head -40` | Succeeds with no credential. Type names only — **do not** paste the full list if it names customers | `REFLECTION` |
+| 1.3 | `signum types --json \| head -40` | Succeeds with no credential. With Signum.Authorization it lists **no entity**, and stderr says so with the login command (`AuthServer.cs:70-75`). Type names only — **do not** paste the full list if it names customers | `REFLECTION` |
 | 1.4 | `signum queries --json` | **Expect an empty or near-empty list.** `AuthServer.cs:143-157` clears `queryDefined` for any query the caller may not run, and an anonymous caller may run none. An empty list here is the *correct* result, not a bug | the role-dependence claim |
 | 1.5 | `signum cache show` | One entry, scope `anon` | cache split (#76) |
 | 1.6 | `signum types --offline --json \| head -5` | Same data, no network | AC-24.4 |

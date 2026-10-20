@@ -121,7 +121,6 @@ async function login(ctx: Ctx): Promise<ExitCode> {
   let rotated: string | undefined;
   const http = new SignumHttp({
     baseUrl: url,
-    instance: ctx.args.flags.instance,
     token,
     timeoutMs: ctx.args.flags.timeoutMs,
     trace: ctx.args.flags.verbose ? (l) => ctx.io.err(l) : undefined,

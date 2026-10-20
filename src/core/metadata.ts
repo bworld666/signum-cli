@@ -4,8 +4,9 @@
  * REQ-010, REQ-011 · STORY-24, STORY-61
  *
  * Two properties worth protecting:
- *   • The endpoint is [SignumAllowAnonymous], so discovery and dynamic help need NO
- *     credentials (AC-61.4). Someone can evaluate an app before being onboarded.
+ *   • The endpoint is [SignumAllowAnonymous], so discovery needs NO credentials (AC-61.4).
+ *     What it shows an anonymous caller is another matter: with Signum.Authorization, no entity
+ *     at all (AuthServer.cs:70-75) — see `needsLogin`.
  *   • It sends Last-Modified and honours If-Modified-Since, so a warm cache makes
  *     discovery work fully offline (AC-61.3).
  *
@@ -16,14 +17,15 @@
  * `queryDefined` is the exception — it IS verified: `TypeInfoTS.QueryDefined`
  * (ReflectionServer.cs:474) is camel-cased on the wire and carries
  * `[JsonIgnore(WhenWritingDefault)]`, so it is present-and-true or absent, never `false`.
- * It is also ROLE-DEPENDENT: `AuthServer.cs:143-157` clears it for any query the caller may
- * not run, and an anonymous caller may run none. That is why the cache is split by auth state
- * (config.ts `cachePath`) — a stale anonymous document would say "nothing is queryable".
+ * It is also ROLE-DEPENDENT: `AuthServer.cs:161-176` clears it for any query the caller may
+ * not run, and says so in `queryAllowed: "None"`; an anonymous caller may run none. That is why
+ * the cache is split by auth state (config.ts `cachePath`) — a stale anonymous document would say
+ * "nothing is queryable".
  */
 
 import { SignumHttp } from "./http.ts";
 import { loadMetadataCache, saveMetadataCache } from "./metadata-cache.ts";
-import { CliError, ExitCode, UsageError } from "./errors.ts";
+import { CliError, ExitCode, NotAuthenticatedError, NotAuthorizedError, NotFoundError, UsageError } from "./errors.ts";
 import { editDistance } from "./text.ts";
 
 export interface MemberInfo {
@@ -53,12 +55,31 @@ export interface TypeInfo {
   members: MemberInfo[];
   operations: OperationInfo[];
   hasQuery: boolean;
+  /** Absent without Signum.Authorization, and for a value it does not define. See `queryDenied`. */
+  queryAllowed: QueryAllowed | undefined;
+}
+
+/**
+ * May the caller's role run a type's query, as Signum.Authorization reports it (AuthServer.cs:161-176).
+ * `None` also clears `queryDefined`, which is what tells "you may not" from "there is none". The API
+ * runs `EmbeddedOnly` queries (DynamicQueryContainer.cs:29, `fullScreen: false`).
+ */
+export type QueryAllowed = "Allow" | "EmbeddedOnly" | "None";
+const QUERY_ALLOWED: ReadonlySet<string> = new Set<QueryAllowed>(["Allow", "EmbeddedOnly", "None"]);
+
+/** The caller's role may not run this type's query: the server cleared `queryDefined` and said why. */
+export function queryDenied(t: TypeInfo): boolean {
+  return !t.hasQuery && t.queryAllowed === "None";
 }
 
 export interface Metadata {
   types: Map<string, TypeInfo>;
   /** Where it came from, for `--explain` and staleness reporting. */
-  origin: { url: string; fetchedAt: string; fromCache: boolean; stale: boolean };
+  origin: {
+    url: string; fetchedAt: string; fromCache: boolean; stale: boolean;
+    /** Fetched with a credential. Reflection answers depend on who asks (AuthServer.cs:70-176). */
+    authenticated: boolean;
+  };
 }
 
 function str(v: unknown): string | undefined {
@@ -103,6 +124,7 @@ export function parseMetadata(payload: unknown, origin: Metadata["origin"]): Met
         members: parseMembers(t["members"]),
         operations: parseOperations(t["operations"]),
         hasQuery: t["queryDefined"] === true || t["hasQuery"] === true,
+        queryAllowed: QUERY_ALLOWED.has(String(t["queryAllowed"])) ? t["queryAllowed"] as QueryAllowed : undefined,
       });
     }
   }
@@ -154,14 +176,18 @@ export function queryableTypes(md: Metadata): TypeInfo[] {
 }
 
 /**
- * Resolve a query key against metadata, or fail with a message that says which of the two
- * possible problems it is (AC-20.7, AC-63.4).
+ * Resolve a query key against metadata, or fail with a message that says which problem it is
+ * (AC-20.7, AC-63.4, AC-63.6).
  *
- * @throws UsageError when the type is unknown, or known but exposes no query the caller may run.
+ * @throws NotAuthenticatedError when the key is missing from an anonymous view that hides entities.
+ * @throws NotAuthorizedError when the caller's role may not run the query (REQ-051: exit 4).
+ * @throws UsageError when the type is unknown, or known but defines no query.
  */
 export function resolveQueryKey(md: Metadata, key: string): TypeInfo {
   const type = findType(md, key);
   if (type === undefined) {
+    const hidden = needsLogin(md, `query key '${key}'`);
+    if (hidden !== undefined) throw hidden;
     const near = suggestTypes(md, key);
     throw new UsageError(`unknown query key '${key}'`, {
       hint: near.length > 0
@@ -169,17 +195,71 @@ export function resolveQueryKey(md: Metadata, key: string): TypeInfo {
         : "Run `signum queries` to see available queries.",
     });
   }
+  if (queryDenied(type)) {
+    // Refused here rather than sent: the server would answer 403 + UnauthorizedAccessException
+    // (DynamicQueryContainer.cs:205-209), which is exit 4 too. Anonymously it means "log in": an app
+    // with QueryAuthLogic but not TypeAuthLogic lists its entities to anyone, and denies every query.
+    if (!md.origin.authenticated) {
+      throw new NotAuthenticatedError(`query '${type.name}' needs a login`, {
+        loginHint: { url: md.origin.url, render: (login) => `Log in and retry: ${login}` },
+      });
+    }
+    throw new NotAuthorizedError(`your role may not run query '${type.name}'`, {
+      hint:
+        "The application's permissions deny this query to you (queryAllowed: None). That is a\n" +
+        "permission, not a typo: retrying will not help. Ask an administrator for access, or run\n" +
+        "`signum queries` for the queries you may run.",
+    });
+  }
   if (!type.hasQuery) {
     throw new UsageError(`'${type.name}' has no query you can run`, {
       hint:
-        "The application's metadata reports no default query for this type, either because it\n" +
-        "defines none or because your role is not allowed to run it (both look the same on the\n" +
-        `wire). Run \`signum queries\` for what IS available, or \`signum explain ${type.name}\` for\n` +
-        "the type itself. If this metadata was cached before you logged in, run `signum auth\n" +
-        "status` first — reflection answers depend on who is asking.",
+        "The application's metadata reports no default query for this type.\n" +
+        `Run \`signum queries\` for what IS available, or \`signum explain ${type.name}\` for the type itself.`,
     });
   }
   return type;
+}
+
+/**
+ * The error for a name missing from an ANONYMOUS view that hides entities, else undefined.
+ *
+ * With Signum.Authorization, reflection lists no entity type to a caller who is not logged in
+ * (AuthServer.cs:70-75). An anonymous document without a single entity is therefore that view,
+ * not an application without entities, and "unknown type" would send the user hunting for a typo.
+ * Logging in is what helps, which is what exit 3 means. Seen live: a handful of types and no
+ * entity anonymously, hundreds logged in.
+ */
+export function needsLogin(md: Metadata, subject: string): NotAuthenticatedError | undefined {
+  if (!hidesEntities(md)) return undefined;
+  return new NotAuthenticatedError(`${subject} is not visible without a login`, {
+    loginHint: { url: md.origin.url, render: (login) => `${anonymousViewNote(md)}\nLog in and retry: ${login}` },
+  });
+}
+
+/**
+ * The error for a type name `md` does not know — the one answer every lookup gives: "log in" when an
+ * anonymous view hides it (exit 3), else "unknown type" with the nearest names (exit 5, AC-63.4).
+ */
+export function unknownTypeError(md: Metadata, name: string): NotAuthenticatedError | NotFoundError {
+  const hidden = needsLogin(md, `type '${name}'`);
+  if (hidden !== undefined) return hidden;
+  const near = suggestTypes(md, name);
+  return new NotFoundError(`unknown type '${name}'`, {
+    hint: near.length > 0
+      ? `Did you mean: ${near.join(", ")}?\nRun \`signum types\` for the full list.`
+      : "Run `signum types` to see what this application exposes.",
+  });
+}
+
+/** An anonymous view with no entity in it: what Signum.Authorization shows a caller not logged in. */
+export function hidesEntities(md: Metadata): boolean {
+  return !md.origin.authenticated && ![...md.types.values()].some(isEntityTypeInfo);
+}
+
+/** One line saying what an anonymous view leaves out. */
+export function anonymousViewNote(md: Metadata): string {
+  return `Without a login this application lists ${md.types.size} types and no entity: it shows its entities only to a logged-in user.`;
 }
 
 /**
@@ -228,7 +308,7 @@ export async function loadMetadata(opts: LoadMetadataOptions): Promise<Metadata>
       });
     }
     return parseMetadata(cached.payload, {
-      url: opts.url, fetchedAt: cached.fetchedAt, fromCache: true, stale: true,
+      url: opts.url, fetchedAt: cached.fetchedAt, fromCache: true, stale: true, authenticated,
     });
   }
 
@@ -242,21 +322,21 @@ export async function loadMetadata(opts: LoadMetadataOptions): Promise<Metadata>
 
     if (res.notModified && cached !== undefined) {
       return parseMetadata(cached.payload, {
-        url: opts.url, fetchedAt: cached.fetchedAt, fromCache: true, stale: false,
+        url: opts.url, fetchedAt: cached.fetchedAt, fromCache: true, stale: false, authenticated,
       });
     }
 
     const lastModified = res.headers.get("last-modified") ?? undefined;
     saveMetadataCache(opts.url, authenticated, res.body, lastModified, opts.env);
     return parseMetadata(res.body, {
-      url: opts.url, fetchedAt: new Date().toISOString(), fromCache: false, stale: false,
+      url: opts.url, fetchedAt: new Date().toISOString(), fromCache: false, stale: false, authenticated,
     });
   } catch (err) {
     // A stale cache is used and flagged, never discarded (AC-61.6).
     if (cached !== undefined) {
       opts.warn?.(`warning: could not refresh metadata, using cache from ${cached.fetchedAt}\n`);
       return parseMetadata(cached.payload, {
-        url: opts.url, fetchedAt: cached.fetchedAt, fromCache: true, stale: true,
+        url: opts.url, fetchedAt: cached.fetchedAt, fromCache: true, stale: true, authenticated,
       });
     }
     throw err;

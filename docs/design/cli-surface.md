@@ -164,9 +164,12 @@ So help has two layers, and the split determines what works when:
 | **Dynamic** — app types, queries, operations, tokens | metadata cache | with a warm cache | **no** — see below |
 
 **Dynamic help needs no credentials.** `GET api/reflection/types` is `[SignumAllowAnonymous]`
-(verified), so `signum --url https://app query Order --help` works *before* logging in. Someone
-evaluating the tool can explore an app's entire surface without an account. That is worth protecting as
-a property.
+(verified), so discovery works *before* logging in. What it shows is another matter: with
+Signum.Authorization installed, reflection lists **no entity type** to an anonymous caller
+(`AuthServer.cs:70-75`, framework `728d981`), only messages, enums and a few models. Verified against a
+live app: a handful of types anonymously, hundreds logged in. So the CLI cannot promise the app's entire surface
+without an account. What it does promise is to say what the anonymous view leaves out. A listing notes
+it on stderr, and a name the view hides is exit 3 with the login command, never "unknown type".
 
 ### The levels
 
@@ -262,7 +265,7 @@ to distinguish "retry might help" from "stop".
 | 1 | Unexpected error | no |
 | 2 | Usage error — bad flags, unparseable filter | no |
 | 3 | Not authenticated (403 + `AuthenticationException`) | after re-auth |
-| 4 | Not authorized (403 + `UnauthorizedAccessException`) | **no** |
+| 4 | Not authorized (403 + `UnauthorizedAccessException`, or a query reflection reports `queryAllowed: None` for your role, refused before it is sent) | **no** |
 | 5 | Not found | no |
 | 6 | Validation failed (400 `ValidationProblemDetails`) | after fixing input |
 | 7 | Concurrency conflict (`ConcurrencyException`) | **yes**, after refetch |

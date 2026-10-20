@@ -7,7 +7,7 @@
 import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, NotFoundError, UsageError } from "../core/errors.ts";
 import { renderDataDocument, renderDocument } from "../core/output.ts";
-import { findType, isEntityTypeInfo, loadMetadata, suggestTypes } from "../core/metadata.ts";
+import { findType, isEntityTypeInfo, loadMetadata, unknownTypeError } from "../core/metadata.ts";
 import { flag } from "../core/ctx.ts";
 import { resolveTarget } from "../core/target.ts";
 import { persistHandles } from "../core/handles.ts";
@@ -66,14 +66,7 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
     env: ctx.io.env, warn: (l) => ctx.io.err(l),
   });
   const type = findType(md, typeName);
-  if (type === undefined) {
-    const near = suggestTypes(md, typeName);
-    throw new NotFoundError(`unknown type '${typeName}'`, {
-      hint: near.length > 0
-        ? `Did you mean: ${near.join(", ")}?`
-        : "Run `signum types` to see what this application exposes.",
-    });
-  }
+  if (type === undefined) throw unknownTypeError(md, typeName);
 
   // Reflection lists enums and symbol containers too; only an entity can be retrieved. A type with
   // no kind (an older or hand-written metadata document) is given the benefit of the doubt.

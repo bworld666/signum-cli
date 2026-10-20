@@ -18,7 +18,7 @@ import {
 } from "./errors.ts";
 import { rotateCredential } from "./credentials.ts";
 import { parseLossless } from "./json.ts";
-import { handoffInstructions, loginCommand } from "./handoff.ts";
+import { handoffSteps } from "./handoff.ts";
 
 export const REDACTED = "<redacted>";
 
@@ -31,8 +31,6 @@ export interface HttpOptions {
   /** Called when the server rotates the token, so it can be persisted. */
   onTokenRotated?: ((token: string) => void) | undefined;
   env?: NodeJS.ProcessEnv;
-  /** The instance name the target was given by, so a login hint can name it back. */
-  instance?: string | undefined;
 }
 
 /**
@@ -166,7 +164,7 @@ export class SignumHttp {
       headers["Authorization"] = `Bearer ${this.opts.token}`;
     } else if (spec.allowAnonymous !== true) {
       throw new NotAuthenticatedError("no stored credential for this target", {
-        hint: "Run `" + loginCommand(this.opts.baseUrl, this.opts.instance) + " --with-token`. See `signum help auth`.",
+        loginHint: { url: this.opts.baseUrl, render: (login) => "Run `" + login + " --with-token`. See `signum help auth`." },
       });
     }
 
@@ -255,10 +253,13 @@ export class SignumHttp {
         // AC-12.11: a token that stopped working needs a fresh browser handoff, and saying only
         // "re-run login" leaves the user to rediscover how to obtain one.
         return new NotAuthenticatedError(`not authenticated: ${message}`, {
-          hint:
-            "The token is no longer accepted, so a fresh browser handoff is required.\n" +
-            "(If it came from SIGNUM_TOKEN, replace the variable's value instead.)\n\n" +
-            handoffInstructions(this.opts.baseUrl, this.opts.instance),
+          loginHint: {
+            url: this.opts.baseUrl,
+            render: (login) =>
+              "The token is no longer accepted, so a fresh browser handoff is required.\n" +
+              "(If it came from SIGNUM_TOKEN, replace the variable's value instead.)\n\n" +
+              handoffSteps(login),
+          },
         });
       }
       if (type.includes("UnauthorizedAccessException")) {

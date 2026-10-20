@@ -11,6 +11,9 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { run } from "../src/cli.ts";
 import type { Io } from "../src/core/ctx.ts";
 import { ExitCode } from "../src/core/errors.ts";
@@ -64,6 +67,35 @@ describe("static help works with zero configuration (AC-60.2)", () => {
   it("an unknown command exits 2 on stderr — help asked for is output, a mistake is a diagnostic", async () => {
     const r = await cli(["bogus-command-xyz"]);
     expect(r.code).toBe(ExitCode.Usage);
+  });
+
+  it("as a real process with an empty environment: stdout, exit 0, and nothing written", async () => {
+    // The in-process tests inject their environment; this one is the CLI as a user's shell runs it,
+    // with no PATH entries, no HOME of its own and no SIGNUM_* beyond an empty config dir.
+    const home = mkdtempSync(join(tmpdir(), "signum-help-"));
+    try {
+      const spawn = async (argv: string[]) => {
+        const proc = Bun.spawn([process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), ...argv], {
+          env: { PATH: "/usr/bin:/bin", HOME: home, SIGNUM_CONFIG_DIR: join(home, "config") },
+          stdin: "ignore", stdout: "pipe", stderr: "pipe",
+        });
+        const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+        return { out, err, code };
+      };
+      for (const argv of [[], ["help", "filter"], ["query", "--help"], ["help", "-o", "json"]]) {
+        const r = await spawn(argv);
+        expect(r.code).toBe(ExitCode.Ok);
+        expect(r.out.length).toBeGreaterThan(100);
+        expect(r.err).toBe("");
+      }
+      const typo = await spawn(["typs"]);
+      expect(typo.code).toBe(ExitCode.Usage);
+      expect(typo.out).toBe("");
+      expect(typo.err).toContain("signum types");
+      expect(readdirSync(home)).toEqual([]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 

@@ -185,7 +185,11 @@ offline tab-completion and pre-flight validation.
 > credential is *required*; the response still differs by caller. `AuthServer.cs:143-157`
 > rewrites `TypeInfoTS.QueryDefined` to `false` for any query the caller may not run, and
 > `UserEntity.Current == null` (an anonymous request) means *no* query is allowed — so an
-> anonymous document reports nothing as queryable. Meanwhile `ReflectionServer.LastModified` is a
+> anonymous document reports nothing as queryable. With TypeAuthLogic started it goes further and
+> drops every **entity** type for an anonymous caller (`AuthServer.cs:70-75`, framework `728d981`):
+> verified live, an anonymous document listed a handful of types and no entity. A logged-in caller denied a
+> query sees `queryDefined` cleared *and* `queryAllowed: "None"` (`AuthServer.cs:161-176`), which is
+> what tells "you may not" from "there is none". Meanwhile `ReflectionServer.LastModified` is a
 > process-wide static (`ReflectionController.cs:17`), so the server will happily answer `304` to
 > a conditional request from a *different* caller. **Cache anonymous and authenticated responses
 > separately**, or a pre-login `types` call poisons every post-login validation.

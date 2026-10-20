@@ -9,12 +9,14 @@
  */
 
 import type { Ctx } from "../core/ctx.ts";
-import { ExitCode, NotFoundError, UsageError } from "../core/errors.ts";
+import { ExitCode, UsageError } from "../core/errors.ts";
 import { listingShape, renderDocument, renderListing } from "../core/output.ts";
 import { isBuiltIn } from "../core/args.ts";
 import {
-  findType, isEntityTypeInfo, loadMetadata, queryableTypes, suggestTypes, TYPE_KINDS, type Metadata, type OperationInfo, type TypeInfo,
+  anonymousViewNote, findType, hidesEntities, isEntityTypeInfo, loadMetadata, queryableTypes, queryDenied, TYPE_KINDS,
+  unknownTypeError, type Metadata, type OperationInfo, type TypeInfo,
 } from "../core/metadata.ts";
+import { loginCommand } from "../core/handoff.ts";
 import { flag, opt } from "../core/ctx.ts";
 import { resolveTarget } from "../core/target.ts";
 import { sensitivity } from "../core/privacy.ts";
@@ -121,8 +123,11 @@ function listQueries(ctx: Ctx, md: Metadata, pattern: string | undefined): ExitC
   if (rows.length === 0) {
     ctx.io.err("no queries reported by this application's metadata\n");
     // `queryDefined` is role-dependent (AuthServer.cs:143-157) and an anonymous caller may run
-    // no query at all, so "none" most often means "not logged in", not "none exist".
-    ctx.io.err("note: queries you may run depend on who you are — try `signum auth login`, or `signum types`\n");
+    // no query at all, so "none" most often means "not logged in", not "none exist". Already said,
+    // with the login command, when the anonymous view hides every entity.
+    if (!hidesEntities(md)) {
+      ctx.io.err("note: queries you may run depend on who you are — try `signum auth login`, or `signum types`\n");
+    }
     return ExitCode.Ok;
   }
   for (const t of rows) ctx.io.out(`${t.name}\n`);
@@ -133,7 +138,7 @@ function listOperations(ctx: Ctx, md: Metadata, typeName: string | undefined): E
   let types: TypeInfo[];
   if (typeName !== undefined) {
     const t = findType(md, typeName);
-    if (t === undefined) throw unknownType(md, typeName);
+    if (t === undefined) throw unknownTypeError(md, typeName);
     types = [t];
   } else {
     types = [...md.types.values()].filter((t) => t.operations.length > 0);
@@ -174,15 +179,6 @@ function listOperations(ctx: Ctx, md: Metadata, typeName: string | undefined): E
 
 function kebab(s: string): string {
   return s.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
-}
-
-function unknownType(md: Metadata, name: string): NotFoundError {
-  const near = suggestTypes(md, name);
-  return new NotFoundError(`unknown type '${name}'`, {
-    hint: near.length > 0
-      ? `Did you mean: ${near.join(", ")}?\nRun \`signum types\` for the full list.`
-      : "Run `signum types` to see what this application exposes.",
-  });
 }
 
 /**
@@ -314,6 +310,7 @@ async function explainType(ctx: Ctx, root: TypeInfo): Promise<ExitCode> {
       { kind: "type", name: root.name, typeKind: root.kind ?? null, entityKind: root.entityKind ?? null,
         niceName: root.niceName ?? null,
         hasQuery: root.hasQuery,
+        queryAllowed: root.queryAllowed ?? null,
         // `members` is the reflection view, `queryTokens` the query view. Both are named for what
         // they are so a machine consumer cannot mistake one for the other — the whole defect in
         // #98 was a reader assuming they were the same list.
@@ -376,6 +373,8 @@ async function explainType(ctx: Ctx, root: TypeInfo): Promise<ExitCode> {
       "\nNext: signum explain " + root.name + ".<token>   ·   signum query " + root.name +
       (sampleToken !== undefined ? ` --column ${sampleToken}` : "") + "\n",
     );
+  } else if (queryDenied(root)) {
+    ctx.io.out(`\nYour role may not run this type's query (queryAllowed: None), so \`signum query ${root.name}\` exits 4.\n`);
   } else {
     ctx.io.out(
       `\nThis type has no query, so it has no tokens and \`signum query ${root.name}\` will refuse it.\n` +
@@ -424,7 +423,7 @@ async function explain(ctx: Ctx, md: Metadata, subject: string | undefined): Pro
   // Otherwise a type, optionally followed by a token path.
   const segments = subject.split(".");
   const root = findType(md, segments[0] as string);
-  if (root === undefined) throw unknownType(md, segments[0] as string);
+  if (root === undefined) throw unknownTypeError(md, segments[0] as string);
 
   if (segments.length === 1 && flag(ctx, "privacy")) return explainPrivacy(ctx, md, root);
   if (segments.length === 1) return await explainType(ctx, root);
@@ -528,6 +527,11 @@ export async function runDiscover(
   const md = await metadata(ctx);
   noteOrigin(ctx, md);
   const arg = ctx.args.positionals[0];
+  if (which !== "explain" && hidesEntities(md)) {
+    // On stderr, so it reaches a reader of any format: an anonymous listing of a dozen messages
+    // and enums otherwise reads as the whole application (AC-61.4).
+    ctx.io.err(`note: ${anonymousViewNote(md)}\nLog in to see them: ${loginCommand(md.origin.url, ctx.args.flags.instance)}\n`);
+  }
 
   switch (which) {
     case "types":      return listTypes(ctx, md, arg);

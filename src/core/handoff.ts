@@ -15,7 +15,11 @@ export function loginCommand(url?: string, instance?: string): string {
 }
 
 export function handoffInstructions(url?: string, instance?: string): string {
-  const login = loginCommand(url, instance);
+  return handoffSteps(loginCommand(url, instance));
+}
+
+/** The handoff steps around a login command already worded for its target. */
+export function handoffSteps(login: string): string {
   return [
     "To obtain a token:",
     "  1. Sign in to the web application in your browser.",
