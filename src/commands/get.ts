@@ -86,6 +86,12 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
   // Reflection lists enums and symbol containers too; only an entity can be retrieved. A type with
   // no kind (an older or hand-written metadata document) is given the benefit of the doubt.
   if (type.kind !== undefined && !isEntityTypeInfo(type)) {
+    if (type.kind === "Entity") {
+      // An embedded or model type: reflection lists it as an entity, but it has no id of its own.
+      throw new UsageError(`'${type.name}' is an embedded or model type, not a stored entity, so it cannot be retrieved`, {
+        hint: `Run \`signum explain ${type.name}\` to see its members. Retrievable types show an entity kind in \`signum types\`, e.g. "Entity (Main)".`,
+      });
+    }
     throw new UsageError(`'${type.name}' is ${/^[AEIOU]/.test(type.kind) ? "an" : "a"} ${type.kind}, not an entity, so it cannot be retrieved`, {
       hint: `Run \`signum explain ${type.name}\` to see its ${type.kind === "SymbolContainer" ? "symbols" : "values"}.`,
     });

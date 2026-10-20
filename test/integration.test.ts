@@ -76,6 +76,9 @@ const REFLECTION = {
     kind: "SymbolContainer", niceName: "Basic permission",
     members: { AdminRules: { niceName: "Admin rules", id: 7 } },
   },
+  // A model (or embedded) type: kind Entity like any ModifiableEntity, but no entityKind — only an
+  // IEntity has one (ReflectionServer.cs:259-264) — so it is not a record with an id of its own.
+  AgreementModel: { kind: "Entity", niceName: "Agreement", members: { Accepted: { type: { name: "boolean" } } } },
   // Exist purely so their query keys pass the metadata-validation step before hitting the
   // 400/500 fixture routes above.
   BadInput: { kind: "Entity", entityKind: "Main", queryDefined: true, members: {}, operations: {} },
@@ -471,7 +474,7 @@ describe("discovery without credentials (STORY-24, STORY-61)", () => {
     const r = await cli(["types", "--url", baseUrl, "--json"]);
     expect(r.code).toBe(ExitCode.Ok);
     const types = JSON.parse(r.out) as Array<{ name: string }>;
-    expect(types.map((t) => t.name).sort()).toEqual(["BadInput", "BasicPermission", "Broken", "Ledger", "Order", "OrderState", "UserEntity"]);
+    expect(types.map((t) => t.name).sort()).toEqual(["AgreementModel", "BadInput", "BasicPermission", "Broken", "Ledger", "Order", "OrderState", "UserEntity"]);
   });
 
   it("explains a type from metadata", async () => {
@@ -2527,6 +2530,12 @@ describe("enums, symbols and the app version (REQ-011, REQ-007)", () => {
     const r = await cli(["get", "OrderState", "1"], { tty: true });
     expect(r.code).toBe(ExitCode.Usage);
     expect(r.err).toContain("'OrderState' is an Enum, not an entity");
+  });
+
+  it("refuses to retrieve a model type: kind Entity, but no entity kind and so no id", async () => {
+    const r = await cli(["get", "AgreementModel", "1"], { tty: true });
+    expect(r.code).toBe(ExitCode.Usage);
+    expect(r.err).toContain("'AgreementModel' is an embedded or model type, not a stored entity");
   });
 
   it("auth status and its whoami alias report the application's version", async () => {
