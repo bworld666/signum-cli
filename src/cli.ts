@@ -4,7 +4,7 @@
  * STORY-09 (non-interactive by construction) · STORY-51 (agent gate) · STORY-63 (errors route to help)
  */
 
-import { assertKnownFlags, BUILT_INS, flagCheckPath, parseArgs, type ParsedArgs } from "./core/args.ts";
+import { assertFormatSupported, assertKnownFlags, BUILT_INS, flagCheckPath, parseArgs, type ParsedArgs } from "./core/args.ts";
 import { nearest } from "./core/text.ts";
 import { CliError, ExitCode, UsageError, exitCodeOf } from "./core/errors.ts";
 import { detectCallerContext } from "./core/caller.ts";
@@ -162,7 +162,10 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitCode> {
       // Validate against the SUBCOMMAND's flags once it's known to be a real one; an invalid
       // subcommand should get its own "unknown subcommand" error, not a flag one.
       const path = flagCheckPath(args.command as string, args.positionals[0]);
-      if (path !== undefined) assertKnownFlags(args, path);
+      if (path !== undefined) {
+        assertKnownFlags(args, path);
+        assertFormatSupported(args, path);
+      }
       return await handler(ctx, args.command as string);
     }
 

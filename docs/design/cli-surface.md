@@ -238,7 +238,10 @@ it means.
 kubectl's `-o` wins over `gh`'s `--json <fields> --jq <expr>`: it is one flag, it covers more formats,
 and it is the more widely known idiom.
 
-- **TTY → `table`. Not a TTY → `json`.** Explicit `-o` always wins (AC-22.1).
+- **TTY → `table`. Not a TTY → `json`.** Explicit `-o` always wins (AC-22.1) — or is refused, exit 2,
+  by a command that cannot write it: `csv`, `tsv` and `name` need rows, so a command that prints a
+  document (`get`, `explain`, `version`, `auth status`, …) accepts only `table`, `json` and `ndjson`.
+  Each command's formats are in its structured help (`signum help <command> -o json`).
 - Data on **stdout**, diagnostics on **stderr**, always (AC-22.2).
 - `-o name` prints bare `Lite` keys, one per line, for piping into `xargs`.
 - `-o ndjson` streams; nothing buffers (AC-22.5).

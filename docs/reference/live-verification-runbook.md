@@ -68,15 +68,17 @@ Obtain a token (human does this, once):
 ## Phase 0 — the automated suite (run this first)
 
 `test/m1.live.test.ts` runs every m1 command against the app and asserts **shapes only** — booleans,
-type names and counts — so a failure cannot print data. The human runs it, in their own shell:
+type names and counts — so a failure cannot print data. `test/terminal.live.test.ts` runs the CLI as a
+child process on a real pseudo-terminal and into a pipe (REQ-050), which no in-process test can: they
+inject the TTY answer instead of asking for it. The human runs them, in their own shell (`.live.test`
+selects every live suite):
 
 ```bash
 # a registered instance with a stored login (`signum instance add`, `signum -i <name> auth login`)
-SIGNUM_LIVE_INSTANCE=<name> ./node_modules/.bin/bun test test/m1.live.test.ts test/entity.live.test.ts
+SIGNUM_LIVE_INSTANCE=<name> ./node_modules/.bin/bun test .live.test
 
 # or a URL and a token from the environment
-SIGNUM_LIVE_URL="$SIGNUM_URL" SIGNUM_LIVE_TOKEN="$SIGNUM_TOKEN" \
-  ./node_modules/.bin/bun test test/m1.live.test.ts test/entity.live.test.ts
+SIGNUM_LIVE_URL="$SIGNUM_URL" SIGNUM_LIVE_TOKEN="$SIGNUM_TOKEN" ./node_modules/.bin/bun test .live.test
 ```
 
 The stored token is read in memory and never printed. `SIGNUM_LIVE_ENTITY="<Type>;<id>"` names the

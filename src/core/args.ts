@@ -14,7 +14,7 @@
 
 import { UsageError, type ExitCode } from "./errors.ts";
 import { parseOutputFormat, type OutputFormat } from "./output.ts";
-import { COMMANDS, findCommand, knownFlagNames } from "./help.ts";
+import { COMMANDS, findCommand, formatsOf, knownFlagNames } from "./help.ts";
 import { nearest } from "./text.ts";
 
 /**
@@ -293,4 +293,18 @@ export function assertKnownFlags(args: ParsedArgs, path: readonly string[]): voi
 
 export interface ExitSignal {
   code: ExitCode;
+}
+
+/**
+ * An explicit `-o` always wins (REQ-050), so a format the command cannot write is a usage error.
+ * Ignoring it printed the human listing into `signum types -o csv > types.csv`: a file that is not
+ * CSV, handed to a pipeline with exit 0.
+ */
+export function assertFormatSupported(args: ParsedArgs, path: readonly string[]): void {
+  const asked = args.flags.output;
+  const formats = formatsOf(path);
+  if (asked === undefined || formats.includes(asked)) return;
+  throw new UsageError(`'${path.join(" ")}' does not support --output ${asked}`, {
+    hint: `Use --output ${formats.join(", ")}: \`signum ${path.join(" ")}\` prints a document, not rows.`,
+  });
 }

@@ -262,6 +262,37 @@ export function renderDocument(value: unknown, opts: DocumentOptions): void {
   writeDocument(value, opts.format, opts.write);
 }
 
+/** A metadata listing's columns, in order, and the one `-o name` prints. */
+export interface ListingShape {
+  columns: readonly string[];
+  name: string;
+}
+
+/**
+ * Render a NON-DATA listing (the names, kinds and counts `types`, `queries` and `operations` read
+ * from metadata) in a machine format. json and ndjson are the listing as one document; csv and tsv
+ * carry `shape.columns` as a header, even with no rows; `name` prints one `shape.name` per line.
+ * `table` is not here: each listing aligns its own text.
+ */
+export function renderListing(
+  rows: ReadonlyArray<Record<string, unknown>>,
+  shape: ListingShape,
+  opts: { format: Exclude<OutputFormat, "table">; write: (chunk: string) => void },
+): void {
+  const { format, write } = opts;
+  if (format === "json" || format === "ndjson") {
+    writeDocument(rows, format, write);
+    return;
+  }
+  if (format === "name") {
+    for (const row of rows) write(scalar(row[shape.name]) + "\n");
+    return;
+  }
+  const sep = format === "csv" ? "," : "\t";
+  const line = (values: readonly unknown[]): string => values.map((v) => csvEscape(scalar(v), sep)).join(sep);
+  write([line(shape.columns), ...rows.map((row) => line(shape.columns.map((c) => row[c])))].join("\n") + "\n");
+}
+
 /**
  * Render a document that IS server data — an entity from `get`, an existence answer. Same
  * rendering as `renderDocument`, different door: it takes a gated `DataWriter` (ADR 0007).

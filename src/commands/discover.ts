@@ -10,7 +10,7 @@
 
 import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, NotFoundError, UsageError } from "../core/errors.ts";
-import { renderDocument } from "../core/output.ts";
+import { renderDocument, renderListing, type ListingShape } from "../core/output.ts";
 import { isBuiltIn } from "../core/args.ts";
 import {
   findType, isEntityTypeInfo, loadMetadata, queryableTypes, suggestTypes, TYPE_KINDS, type Metadata, type OperationInfo, type TypeInfo,
@@ -50,6 +50,15 @@ function memberNoun(t: TypeInfo): string {
     : "members";
 }
 
+// The columns csv and tsv write, in the order json lists them, and the one `-o name` prints.
+const TYPE_LISTING: ListingShape = {
+  columns: ["name", "kind", "entityKind", "niceName", "members", "operations", "hasQuery"], name: "name",
+};
+const QUERY_LISTING: ListingShape = { columns: ["queryKey", "niceName"], name: "queryKey" };
+const OPERATION_LISTING: ListingShape = {
+  columns: ["type", "key", "verb", "command", "shadowed", "niceName"], name: "key",
+};
+
 function listTypes(ctx: Ctx, md: Metadata, pattern: string | undefined): ExitCode {
   const wanted = pattern?.toLowerCase();
   const kindFlag = opt(ctx, "kind");
@@ -64,12 +73,13 @@ function listTypes(ctx: Ctx, md: Metadata, pattern: string | undefined): ExitCod
     .filter((t) => kind === undefined || t.kind === kind)
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  if (ctx.format === "json" || ctx.format === "ndjson") {
-    renderDocument(
+  if (ctx.format !== "table") {
+    renderListing(
       rows.map((t) => ({
         name: t.name, kind: t.kind ?? null, entityKind: t.entityKind ?? null, niceName: t.niceName ?? null,
         members: t.members.length, operations: t.operations.length, hasQuery: t.hasQuery,
       })),
+      TYPE_LISTING,
       { format: ctx.format, write: ctx.io.out },
     );
     return ExitCode.Ok;
@@ -95,8 +105,8 @@ function listQueries(ctx: Ctx, md: Metadata, pattern: string | undefined): ExitC
   const rows = queryableTypes(md)
     .filter((t) => wanted === undefined || t.name.toLowerCase().includes(wanted));
 
-  if (ctx.format === "json" || ctx.format === "ndjson") {
-    renderDocument(rows.map((t) => ({ queryKey: t.name, niceName: t.niceName ?? null })),
+  if (ctx.format !== "table") {
+    renderListing(rows.map((t) => ({ queryKey: t.name, niceName: t.niceName ?? null })), QUERY_LISTING,
       { format: ctx.format, write: ctx.io.out });
     return ExitCode.Ok;
   }
@@ -134,8 +144,8 @@ function listOperations(ctx: Ctx, md: Metadata, typeName: string | undefined): E
     })),
   ).sort((a, b) => a.type.localeCompare(b.type) || a.verb.localeCompare(b.verb));
 
-  if (ctx.format === "json" || ctx.format === "ndjson") {
-    renderDocument(rows, { format: ctx.format, write: ctx.io.out });
+  if (ctx.format !== "table") {
+    renderListing(rows, OPERATION_LISTING, { format: ctx.format, write: ctx.io.out });
     return ExitCode.Ok;
   }
 
