@@ -41,10 +41,10 @@ m1 has no pseudonymization engine yet (that is REQ-057, m2), so the m1 behaviour
 detect, and stop.
 
 **Acceptance Criteria:**
-- AC-51.1: Under caller context `agent`, any command that would emit entity or query **data** fails by default with a clear explanation and the exact flag needed to proceed.
+- AC-51.1: Under caller context `agent`, any command that would emit entity or query **data** fails by default with a clear explanation and the exact flag needed to proceed. *(Amended: m2's pseudonymization (REQ-057) is now the default for an `agent` caller — mode `heuristic` (`privacy.ts` `resolvePolicy`) — so data is emitted **pseudonymized** rather than refused, as AC-51.4 anticipated. The refusal still fires, unchanged, whenever pseudonymization is `off`: set by `privacy.json`, or by `--pseudonymize off`, which an agent caller can only request with the acknowledgement flag (AC-52.10). The gate stays in one place, `makeDataOpener` (AC-51.6).)*
 - AC-51.2: `--i-understand-data-goes-to-a-model` (or `SIGNUM_ALLOW_AGENT_DATA=1`) permits it. The name is deliberately unambiguous; no one should be able to pass it by accident or claim they did not know.
 - AC-51.3: Commands emitting **no** data — `auth status`, `--explain`, help, and discovery of type, query and token *names* — are unaffected. Metadata is not row data. *(Amended: **`--count` removed from the exempt list.** A count over a filtered population is an aggregate over personal data, and this story set's own limits section says so: "Aggregates leak. Row counts and distributions are informative even with every value replaced." The implementation gates it; the AC now agrees.)*
-- AC-51.4: The refusal names pseudonymization (m2) as the intended remedy, so the message ages into something useful rather than becoming a lie.
+- AC-51.4: The refusal names pseudonymization (m2) as the intended remedy, so the message ages into something useful rather than becoming a lie. *(Amended: the remedy shipped and is applied by default, see AC-51.1.)*
 - AC-51.5: `interactive` and `automated` contexts are unaffected: a human at a terminal and a cron job keep working with no new flag. Only the `agent` path is gated.
 - AC-51.6: The gate is enforced in one place, at the output boundary, so no future command can bypass it.
 
