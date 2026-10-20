@@ -15,6 +15,7 @@ import { run } from "../src/cli.ts";
 import type { Io } from "../src/core/ctx.ts";
 import { loadHandles, saveHandles } from "../src/core/handles.ts";
 import { ExitCode } from "../src/core/errors.ts";
+import { loadCredential, storedCredentialUrls } from "../src/core/credentials.ts";
 // Asserted via the constant, not a literal: the prefix changed once (ref: -> ref_) and a literal
 // here would have to be found and edited again next time.
 import { HANDLE_PREFIX } from "../src/core/privacy.ts";
@@ -760,8 +761,7 @@ describe("login and status (STORY-12, STORY-06)", () => {
     // Off a TTY login reports as JSON, so the rotation is reported there rather than on stderr.
     expect(JSON.parse(r.out) as { rotatedOnLogin: boolean }).toMatchObject({ rotatedOnLogin: true });
 
-    const stored = JSON.parse(readFileSync(join(dir, "credential.json"), "utf8")) as
-      { token: string; rotatedAt?: string };
+    const stored = loadCredential(baseUrl, { SIGNUM_CONFIG_DIR: dir } as unknown as NodeJS.ProcessEnv)!.credential;
     expect(stored.token).toBe(ROTATED_TOKEN);
     expect(stored.rotatedAt).toBeDefined();
     // And the stored credential actually works — the point of keeping the replacement.
@@ -778,10 +778,108 @@ describe("login and status (STORY-12, STORY-06)", () => {
     });
     expect(r.code).toBe(ExitCode.Ok);
     expect(JSON.parse(r.out) as { rotatedOnLogin: boolean }).toMatchObject({ rotatedOnLogin: false });
-    const stored = JSON.parse(readFileSync(join(dir, "credential.json"), "utf8")) as
-      { token: string; rotatedAt?: string };
+    const stored = loadCredential(baseUrl, { SIGNUM_CONFIG_DIR: dir } as unknown as NodeJS.ProcessEnv)!.credential;
     expect(stored.token).toBe(GOOD_TOKEN);
     expect(stored.rotatedAt).toBeUndefined();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+/**
+ * One credential per target (REQ-001). A second application records the tokens it is sent, so the
+ * tests can show each target gets its own token and never another application's.
+ */
+describe("credentials per target (REQ-001)", () => {
+  const B_TOKEN = "test-token-for-b";
+  let other: ReturnType<typeof Bun.serve>;
+  let otherUrl: string;
+  const seenByOther: string[] = [];
+
+  beforeAll(() => {
+    other = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const token = (req.headers.get("authorization") ?? "").replace(/^Bearer /, "");
+        seenByOther.push(token);
+        const headers = { "content-type": "application/json" };
+        if (new URL(req.url).pathname === "/api/auth/currentUser") {
+          return token === B_TOKEN
+            ? new Response(JSON.stringify({ userName: "bob" }), { headers })
+            : new Response(JSON.stringify({ exceptionType: "Signum.Engine.AuthenticationException", exceptionMessage: "no" }), { status: 403, headers });
+        }
+        return new Response(JSON.stringify({ exceptionMessage: "unhandled" }), { status: 404, headers });
+      },
+    });
+    otherUrl = `http://127.0.0.1:${other.port}`;
+  });
+  afterAll(() => other.stop(true));
+
+  const envOf = (dir: string) => ({ SIGNUM_CONFIG_DIR: dir });
+  const procEnv = (dir: string) => envOf(dir) as unknown as NodeJS.ProcessEnv;
+  async function loginBoth(): Promise<string> {
+    const dir = mkdtempSync(join(tmpdir(), "signum-multi-"));
+    expect((await cli(["auth", "login", "--url", baseUrl], { env: envOf(dir), stdin: GOOD_TOKEN })).code).toBe(ExitCode.Ok);
+    expect((await cli(["auth", "login", "--url", otherUrl], { env: envOf(dir), stdin: B_TOKEN })).code).toBe(ExitCode.Ok);
+    return dir;
+  }
+
+  it("a second login keeps the first, and each target authenticates with its own token", async () => {
+    const dir = await loginBoth();
+    expect(storedCredentialUrls(procEnv(dir))).toEqual([baseUrl, otherUrl].sort());
+    const a = await cli(["auth", "status", "--url", baseUrl, "--json"], { env: envOf(dir) });
+    const b = await cli(["auth", "status", "--url", otherUrl, "--json"], { env: envOf(dir) });
+    expect(JSON.parse(a.out)).toMatchObject({ authenticated: true, user: "alice" });
+    expect(JSON.parse(b.out)).toMatchObject({ authenticated: true, user: "bob" });
+    expect(seenByOther).not.toContain(GOOD_TOKEN);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("the most recent login is the target when none is named", async () => {
+    const dir = await loginBoth();
+    const r = await cli(["auth", "status", "--json"], { env: envOf(dir) });
+    expect(JSON.parse(r.out)).toMatchObject({ target: otherUrl, user: "bob" });
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("never sends one application's token to another", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "signum-multi-"));
+    await cli(["auth", "login", "--url", baseUrl], { env: envOf(dir), stdin: GOOD_TOKEN });
+    seenByOther.length = 0;
+    const r = await cli(["auth", "status", "--url", otherUrl, "--json"], { env: envOf(dir) });
+    expect(r.code).toBe(ExitCode.NotAuthenticated);
+    expect(JSON.parse(r.out)).toMatchObject({ credential: "none" });
+    expect(seenByOther).not.toContain(GOOD_TOKEN);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("a rotation updates only the target that issued it", async () => {
+    const dir = await loginBoth();
+    rotateNext = true;
+    expect((await cli(["query", "Order", "--url", baseUrl, "--json"], { env: envOf(dir) })).code).toBe(ExitCode.Ok);
+    rotateNext = false;
+    expect(loadCredential(baseUrl, procEnv(dir))!.credential.token).toBe(ROTATED_TOKEN);
+    expect(loadCredential(otherUrl, procEnv(dir))!.credential.token).toBe(B_TOKEN);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("logout removes the named target's credential; --all removes the rest", async () => {
+    const dir = await loginBoth();
+    const one = await cli(["auth", "logout", "--url", baseUrl], { env: envOf(dir) });
+    expect(one.out).toContain(`Credential removed for ${baseUrl}`);
+    expect(one.err).toContain(`Still stored: ${otherUrl}`);
+    expect(storedCredentialUrls(procEnv(dir))).toEqual([otherUrl]);
+    await cli(["auth", "logout", "--all"], { env: envOf(dir) });
+    expect(existsSync(join(dir, "credential.json"))).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reads a credential stored before per-target storage, and keeps it on the next login", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "signum-legacy-"));
+    writeFileSync(join(dir, "credential.json"), JSON.stringify({ url: baseUrl, token: GOOD_TOKEN, source: "browser-handoff", savedAt: "2026-01-01T00:00:00Z" }));
+    expect((await cli(["get", "Order", "42", "--json"], { env: envOf(dir), tty: true })).code).toBe(ExitCode.Ok);
+    await cli(["auth", "login", "--url", otherUrl], { env: envOf(dir), stdin: B_TOKEN });
+    expect(loadCredential(baseUrl, procEnv(dir))!.credential.token).toBe(GOOD_TOKEN);
+    expect(loadCredential(otherUrl, procEnv(dir))!.credential.token).toBe(B_TOKEN);
     rmSync(dir, { recursive: true, force: true });
   });
 });
@@ -1631,7 +1729,7 @@ describe("token rotation (STORY-04)", () => {
     rotateNext = true;
     const r = await cli(["query", "Order", "--json"]);
     expect(r.code).toBe(ExitCode.Ok);
-    const stored = JSON.parse(readFileSync(join(configDir, "credential.json"), "utf8")) as { token: string; rotatedAt?: string };
+    const stored = loadCredential(baseUrl, { SIGNUM_CONFIG_DIR: configDir } as unknown as NodeJS.ProcessEnv)!.credential;
     expect(stored.token).toBe(ROTATED_TOKEN);
     expect(stored.rotatedAt).toBeDefined();
   });

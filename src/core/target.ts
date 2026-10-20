@@ -5,8 +5,7 @@
 
 import type { Ctx } from "./ctx.ts";
 import { SignumHttp } from "./http.ts";
-import { loadCredential, type StoredCredential } from "./credentials.ts";
-import { normalizeUrl } from "./text.ts";
+import { defaultCredentialUrl, loadCredential, type StoredCredential } from "./credentials.ts";
 import { NotAuthenticatedError, UsageError } from "./errors.ts";
 
 export interface Target {
@@ -21,8 +20,7 @@ export interface Target {
 }
 
 export function resolveTarget(ctx: Ctx, options: { requireAuth?: boolean } = {}): Target {
-  const stored = loadCredential(ctx.io.env);
-  const url = ctx.args.flags.url ?? stored?.credential.url;
+  const url = ctx.args.flags.url ?? defaultCredentialUrl(ctx.io.env);
 
   if (url === undefined) {
     throw new UsageError("no target application specified", {
@@ -32,10 +30,9 @@ export function resolveTarget(ctx: Ctx, options: { requireAuth?: boolean } = {})
     });
   }
 
-  // Use the stored token only for the target it was issued against.
-  // Compare canonically so a trailing slash or default port does not orphan the credential (M2).
-  const credential =
-    stored !== undefined && normalizeUrl(stored.credential.url) === normalizeUrl(url) ? stored.credential : undefined;
+  // The stored token for THIS target only — never one issued to another application.
+  const stored = loadCredential(url, ctx.io.env);
+  const credential = stored?.credential;
 
   /**
    * AC-09.2: every credential can be supplied by environment variable.

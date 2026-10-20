@@ -109,14 +109,17 @@ export const COMMANDS: CommandSpec[] = [
         // Implemented in runAuth since m1 but never declared here, so it was absent from
         // SUBCOMMANDS, had no `--help`, and `signum help auth logout` fell back to the topic.
         name: "logout",
-        summary: "Remove the stored credential from this machine",
-        usage: "signum auth logout",
+        summary: "Remove a stored credential from this machine",
+        usage: "signum auth logout [--url <url> | -i <name> | --all]",
         milestone: "m1",
         description:
+          "Credentials are stored per target. Without --url or -i this removes the default " +
+          "target's (the most recent login); --all removes every one.\n\n" +
           "Local only. Signum does not revoke issued tokens: api/auth/logout clears a cookie " +
           "and performs no revocation, so the token stays valid server-side until the user's " +
           "password hash or state changes.",
-        examples: ["signum auth logout"],
+        flags: [{ name: "all", summary: "Remove the stored credential for every target" }],
+        examples: ["signum auth logout", "signum auth logout --url https://app.example", "signum auth logout --all"],
       },
     ],
   },

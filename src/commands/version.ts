@@ -8,7 +8,7 @@
 import type { Ctx } from "../core/ctx.ts";
 import { ExitCode } from "../core/errors.ts";
 import { renderDocument } from "../core/output.ts";
-import { loadCredential } from "../core/credentials.ts";
+import { defaultCredentialUrl } from "../core/credentials.ts";
 import { SignumHttp } from "../core/http.ts";
 
 // M4 (Brooks review): single source of truth — read the version from package.json rather
@@ -18,8 +18,7 @@ import pkg from "../../package.json" with { type: "json" };
 export const CLI_VERSION: string = pkg.version;
 
 export async function runVersion(ctx: Ctx): Promise<ExitCode> {
-  const stored = loadCredential(ctx.io.env);
-  const url = ctx.args.flags.url ?? stored?.credential.url;
+  const url = ctx.args.flags.url ?? defaultCredentialUrl(ctx.io.env);
 
   let server: { url: string; reachable: boolean; detail: string | undefined } | undefined;
 
