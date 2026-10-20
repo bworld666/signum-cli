@@ -17,7 +17,7 @@ Measured: 91 MB, 24 ms startup, and all five release targets cross-compiled from
 ## Usage
 
 ```
-signum --url https://your-app types                  # explore, no login needed
+signum --url https://your-app types                  # explore; entities may need a login
 signum auth login --url https://your-app --with-token
 signum auth status                                   # who am I, against what
 signum queries                                       # what can I query?

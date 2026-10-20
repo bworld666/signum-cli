@@ -17,7 +17,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli.ts";
 import type { Io } from "../src/core/ctx.ts";
-import { ExitCode } from "../src/core/errors.ts";
+import { ExitCode, exitCodeOf } from "../src/core/errors.ts";
+import { SignumHttp } from "../src/core/http.ts";
 import { HANDLE_PREFIX } from "../src/core/privacy.ts";
 import { live } from "./live-config.ts";
 
@@ -48,8 +49,9 @@ async function cli(argv: string[], opts: { agent?: boolean; anonymous?: boolean;
   try {
     return { code: await run(argv, io), out, err };
   } catch (e) {
-    const { exitCodeOf } = await import("../src/core/errors.ts");
-    return { code: exitCodeOf(e), out, err: err + String(e) };
+    // As cli.ts `report` prints it: the hint is where an error routes to help.
+    const { CliError } = await import("../src/core/errors.ts");
+    return { code: exitCodeOf(e), out, err: err + (e instanceof CliError ? `error: ${e.message}\n${e.hint ?? ""}` : String(e)) };
   }
 }
 
@@ -63,6 +65,17 @@ function json(r: Result): unknown {
 }
 
 const KINDS = new Set(["Entity", "Enum", "Message", "Query", "SymbolContainer"]);
+
+/**
+ * A query this login's role is denied, from Signum.Authorization's `queryAllowed: "None"`
+ * (AuthServer.cs:161-176). The name stays in memory. An administrator is denied nothing, so then
+ * there is none, and exit 4 cannot be provoked against this app with this login.
+ */
+const deniedQuery: string | undefined = live === undefined ? undefined : await (async () => {
+  const http = new SignumHttp({ baseUrl: live.url, token: live.token, onTokenRotated: () => {} });
+  const res = await http.request<Record<string, { queryAllowed?: unknown }>>({ method: "GET", path: "api/reflection/types" });
+  return Object.entries(res.body ?? {}).find(([, t]) => t.queryAllowed === "None")?.[0];
+})();
 
 describe.skipIf(!configured)("m1 against a live app (REQ-077)", () => {
   it("version: the target is reachable", async () => {
@@ -93,6 +106,22 @@ describe.skipIf(!configured)("m1 against a live app (REQ-077)", () => {
 
   it("types anonymously: discovery needs no credential (AC-61.4)", async () => {
     expect((await cli(["types", "--json"], { anonymous: true })).code).toBe(ExitCode.Ok);
+  });
+
+  it("anonymously, an entity the view hides is exit 3 with the login command, never 'unknown' (AC-61.4)", async () => {
+    // Signum.Authorization lists no entity to an anonymous caller (AuthServer.cs:70-75); an app
+    // without the module lists them, and then they explain as usual.
+    const types = await cli(["types", "--json"], { anonymous: true });
+    const hidden = !(json(types) as Array<{ entityKind: unknown }>).some((t) => typeof t.entityKind === "string");
+    const r = await cli(["explain", lite!.type], { anonymous: true });
+    if (hidden) {
+      expect(types.err.includes("no entity")).toBe(true);
+      expect(r.code).toBe(ExitCode.NotAuthenticated);
+      expect(r.err.includes("auth login")).toBe(true);
+      expect(r.err.includes("unknown")).toBe(false);
+    } else {
+      expect(r.code).toBe(ExitCode.Ok);
+    }
   });
 
   it("queries and explain (REQ-011, REQ-012): the query is offered and its tokens resolve", async () => {
@@ -236,5 +265,19 @@ describe.skipIf(!configured)("m1 against a live app (REQ-077)", () => {
     expect(code).toBe(ExitCode.NotAuthenticated);
     expect(err.includes("401")).toBe(false);
     expect(out).toBe("");
+  });
+
+  // Skipped for a login that is denied nothing; run the suite once with a restricted one.
+  it.skipIf(deniedQuery === undefined)("a query the role is denied is exit 4, from the CLI and from the server (REQ-051, AC-08.2)", async () => {
+    const r = await cli(["query", deniedQuery as string]);
+    expect(r.code).toBe(ExitCode.NotAuthorized);
+    // The server's own answer, past the CLI's check: 403 + UnauthorizedAccessException, never exit 3.
+    const http = new SignumHttp({ baseUrl: url as string, token: token as string, onTokenRotated: () => {} });
+    const failure = await http.request({
+      method: "POST",
+      path: `api/query/lites/${encodeURIComponent(deniedQuery as string)}`,
+      body: { queryKey: deniedQuery, filters: [], orders: [], count: 1 },
+    }).then(() => undefined, (e: unknown) => e);
+    expect(exitCodeOf(failure)).toBe(ExitCode.NotAuthorized);
   });
 });

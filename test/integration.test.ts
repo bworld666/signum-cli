@@ -223,6 +223,11 @@ const EXACT_RESULT_TABLE =
   `{"EntityType":"Customer","id":9007199254740995,"model":"Anna Müller"}]}],"totalElements":1}`;
 /** When set, every executeQuery answers with EXACT_RESULT_TABLE. */
 let exactResultTable = false;
+/**
+ * Serve reflection as Signum.Authorization does (AuthServer.cs:70-176): no entity at all to an
+ * anonymous caller, and to a logged-in one a `Payroll` whose query the role is denied.
+ */
+let withAuthorization = false;
 
 beforeAll(() => {
   configDir = mkdtempSync(join(tmpdir(), "signum-test-"));
@@ -244,7 +249,13 @@ beforeAll(() => {
 
       // Anonymous — no credential required (AC-61.4).
       if (url.pathname === "/api/reflection/types") {
-        return new Response(JSON.stringify(REFLECTION), {
+        let doc: Record<string, unknown> = REFLECTION;
+        if (withAuthorization) {
+          doc = token === GOOD_TOKEN || token === ROTATED_TOKEN
+            ? { ...REFLECTION, Payroll: { kind: "Entity", entityKind: "Main", niceName: "Payroll", members: { Id: { type: { name: "number" } } }, operations: {}, queryAllowed: "None", typeAllowed: "Read" } }
+            : Object.fromEntries(Object.entries(REFLECTION).filter(([, t]) => !("entityKind" in t)));
+        }
+        return new Response(JSON.stringify(doc), {
           headers: { ...headers, "last-modified": "Wed, 01 Jan 2026 00:00:00 GMT" },
         });
       }
@@ -2232,6 +2243,49 @@ describe("--as-command: emit the invocation, not the data (REQ-078)", () => {
     });
     expect(r.code).toBe(ExitCode.Usage);
     expect(r.err).toContain("--as-command");
+  });
+});
+
+describe("what reflection says about who is asking (REQ-051, AC-61.4)", () => {
+  beforeAll(() => { withAuthorization = true; });
+  afterAll(() => { withAuthorization = false; });
+  const fresh = (): string => mkdtempSync(join(tmpdir(), "signum-who-"));
+  const loggedIn = (): { env: Record<string, string> } => ({ env: { SIGNUM_CONFIG_DIR: fresh(), SIGNUM_TOKEN: GOOD_TOKEN } });
+  const anonymous = (): { env: Record<string, string> } => ({ env: { SIGNUM_CONFIG_DIR: fresh() } });
+
+  it("a query the role is denied is exit 4, a permission and not a usage error", async () => {
+    const r = await cli(["query", "Payroll", "--url", baseUrl], loggedIn());
+    expect(r.code).toBe(ExitCode.NotAuthorized);
+    expect(r.err).toContain("your role may not run query 'Payroll'");
+    expect(r.err).toContain("retrying will not help");
+  });
+
+  it("a type that defines no query is still a usage error", async () => {
+    expect((await cli(["query", "Ledger", "--url", baseUrl], loggedIn())).code).toBe(ExitCode.Usage);
+  });
+
+  it("explain says the query is denied, and --json carries queryAllowed", async () => {
+    expect((await cli(["explain", "Payroll", "--url", baseUrl], { ...loggedIn(), tty: true })).out).toContain("Your role may not run this type's query");
+    const doc = JSON.parse((await cli(["explain", "Payroll", "--url", baseUrl, "--json"], loggedIn())).out) as { queryAllowed: unknown };
+    expect(doc.queryAllowed).toBe("None");
+  });
+
+  it("anonymously, an entity the view hides is exit 3 with the login command, never 'unknown'", async () => {
+    for (const argv of [["explain", "Order"], ["get", "Order", "1", "--explain"], ["query", "Order", "--explain"], ["operations", "Order"]]) {
+      const r = await cli([...argv, "--url", baseUrl], anonymous());
+      expect(r.code).toBe(ExitCode.NotAuthenticated);
+      expect(r.err).toContain("is not visible without a login");
+      expect(r.err).toContain(`signum auth login --url ${baseUrl}`);
+      expect(r.err).not.toContain("unknown");
+    }
+  });
+
+  it("anonymously, a listing says on stderr what the view leaves out", async () => {
+    const r = await cli(["types", "--url", baseUrl, "--json"], anonymous());
+    expect(r.code).toBe(ExitCode.Ok);
+    expect((JSON.parse(r.out) as unknown[]).length).toBe(3);
+    expect(r.err).toContain("lists 3 types and no entity");
+    expect(r.err).toContain("signum auth login");
   });
 });
 

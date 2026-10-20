@@ -7,7 +7,7 @@
 import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, NotFoundError, UsageError } from "../core/errors.ts";
 import { renderDataDocument, renderDocument } from "../core/output.ts";
-import { findType, isEntityTypeInfo, loadMetadata, suggestTypes } from "../core/metadata.ts";
+import { findType, isEntityTypeInfo, loadMetadata, needsLogin, suggestTypes } from "../core/metadata.ts";
 import { flag } from "../core/ctx.ts";
 import { resolveTarget } from "../core/target.ts";
 import { persistHandles } from "../core/handles.ts";
@@ -67,6 +67,8 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
   });
   const type = findType(md, typeName);
   if (type === undefined) {
+    const hidden = needsLogin(md, `type '${typeName}'`, ctx.args.flags.instance);
+    if (hidden !== undefined) throw hidden;
     const near = suggestTypes(md, typeName);
     throw new NotFoundError(`unknown type '${typeName}'`, {
       hint: near.length > 0
