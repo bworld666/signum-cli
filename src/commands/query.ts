@@ -373,7 +373,7 @@ async function runTable(
 
   // Total is reported distinctly from rows returned, so a page is never mistaken for all (AC-21.5).
   if (ctx.format === "table" && table.totalElements !== undefined && table.totalElements > table.rows.length) {
-    ctx.io.err(`\n${table.rows.length} of ${table.totalElements} rows (use --top, --page, or --all)\n`);
+    ctx.io.err(`\n${table.rows.length} of ${table.totalElements} rows visible to you (use --top, --page, or --all)\n`);
   }
   return ExitCode.Ok;
 }
