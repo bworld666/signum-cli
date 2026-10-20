@@ -91,13 +91,31 @@ export function validateUrl(url: string): string {
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     throw new UsageError(`unsupported scheme '${parsed.protocol}' in '${url}'`, { hint: "Use an http or https URL." });
   }
+  assertNoUserInfo(url);
+  return normalizeUrl(url);
+}
+
+/**
+ * Refuse a URL that carries a user name or password (REQ-074).
+ *
+ * Every target URL is printed somewhere — `-v` traces, `--explain`, error messages, `instance list`
+ * — so a credential inside one would leak through all of them. The message never repeats the URL.
+ * An unparseable URL is left to the code that uses it.
+ */
+export function assertNoUserInfo(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return;
+  }
   if (parsed.username !== "" || parsed.password !== "") {
-    // A credential in the URL would be stored in plain text and echoed by `instance list`.
-    throw new UsageError("the URL contains a user name or password", {
-      hint: "Store the address only, then run `signum auth login -i <name> --with-token`.",
+    throw new UsageError("the target URL contains a user name or password", {
+      hint:
+        "Credentials never go in a URL: it is printed by traces, --explain and error messages.\n" +
+        "Give the address only, then run `signum auth login --url <address>`.",
     });
   }
-  return normalizeUrl(url);
 }
 
 export function addInstance(slug: string, url: string, env?: NodeJS.ProcessEnv): Instance {
