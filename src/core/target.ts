@@ -5,6 +5,7 @@
 
 import type { Ctx } from "./ctx.ts";
 import { SignumHttp } from "./http.ts";
+import { loginCommand } from "./handoff.ts";
 import { defaultCredentialUrl, loadCredential, type StoredCredential } from "./credentials.ts";
 import { NotAuthenticatedError, UsageError } from "./errors.ts";
 
@@ -55,13 +56,14 @@ export function resolveTarget(ctx: Ctx, options: { requireAuth?: boolean } = {})
     // Exit 3, not 2: this is "not authenticated", and a script may usefully re-auth (AC-09.5).
     throw new NotAuthenticatedError(`no credential for ${url}`, {
       hint:
-        "Run `signum auth login --url " + url + " --with-token`, or set SIGNUM_TOKEN for a\n" +
+        "Run `" + loginCommand(url, ctx.args.flags.instance) + " --with-token`, or set SIGNUM_TOKEN for a\n" +
         "non-interactive run. See `signum help auth`.",
     });
   }
 
   const http = new SignumHttp({
     baseUrl: url,
+    instance: ctx.args.flags.instance,
     token,
     timeoutMs: ctx.args.flags.timeoutMs,
     trace: ctx.args.flags.verbose ? (line) => ctx.io.err(line) : undefined,

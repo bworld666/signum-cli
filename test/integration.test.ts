@@ -2402,6 +2402,19 @@ describe("named instances (REQ-001)", () => {
     rmSync(d, { recursive: true, force: true });
   });
 
+  it("names the instance, not its URL, in the login hint", async () => {
+    const d = mkdtempSync(join(tmpdir(), "signum-e2e-inst-")); // no credential.json: never logged in
+    const env = { SIGNUM_CONFIG_DIR: d };
+    await cli(["instance", "add", "local", baseUrl], { env });
+    const r = await cli(["get", "Order", "42", "-i", "local"], { env, tty: true });
+    expect(r.code).toBe(ExitCode.NotAuthenticated);
+    expect(r.err).toContain("signum -i local auth login");
+    expect(r.err).not.toContain("--url");
+    const login = await cli(["auth", "login", "-i", "local"], { env, tty: true });
+    expect(login.err).toContain("signum -i local auth login < token.txt");
+    rmSync(d, { recursive: true, force: true });
+  });
+
   it("echoes -i, not the URL it resolved to (REQ-078)", async () => {
     const d = profile();
     const env = { SIGNUM_CONFIG_DIR: d };
