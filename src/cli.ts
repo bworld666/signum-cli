@@ -4,7 +4,7 @@
  * STORY-09 (non-interactive by construction) · STORY-51 (agent gate) · STORY-63 (errors route to help)
  */
 
-import { assertKnownFlags, BUILT_INS, flagCheckPath, parseArgs, type ParsedArgs } from "./core/args.ts";
+import { assertFormatSupported, assertKnownFlags, BUILT_INS, flagCheckPath, parseArgs, type ParsedArgs } from "./core/args.ts";
 import { nearest } from "./core/text.ts";
 import { CliError, ExitCode, UsageError, exitCodeOf } from "./core/errors.ts";
 import { detectCallerContext } from "./core/caller.ts";
@@ -28,6 +28,8 @@ import type { Ctx, Io } from "./core/ctx.ts";
 function showHelp(args: ParsedArgs, io: Io): ExitCode {
   // Help is human-facing text, so prose is the default even when piped — unlike data
   // output, which switches to JSON off a TTY. Structured help must be asked for (AC-62.1).
+  // Help is a document whatever it describes, so csv, tsv and name are refused as anywhere else.
+  assertFormatSupported(args, ["help"]);
   const explicit = args.flags.output;
   const asJson = explicit === "json" || explicit === "ndjson";
   const format: OutputFormat = asJson ? explicit : "table";
@@ -162,7 +164,10 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitCode> {
       // Validate against the SUBCOMMAND's flags once it's known to be a real one; an invalid
       // subcommand should get its own "unknown subcommand" error, not a flag one.
       const path = flagCheckPath(args.command as string, args.positionals[0]);
-      if (path !== undefined) assertKnownFlags(args, path);
+      if (path !== undefined) {
+        assertKnownFlags(args, path);
+        assertFormatSupported(args, path);
+      }
       return await handler(ctx, args.command as string);
     }
 

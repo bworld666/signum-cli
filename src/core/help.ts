@@ -11,13 +11,15 @@
  */
 
 import { EXIT_CODE_DESCRIPTIONS, ExitCode } from "./errors.ts";
-import { OUTPUT_FORMATS } from "./output.ts";
+import { OUTPUT_FORMATS, type OutputFormat } from "./output.ts";
 
 export interface FlagSpec {
   name: string;
   alias?: string;
   arg?: string;
   summary: string;
+  /** When given, this flag narrows its command's formats to these — `--lites` returns references, not rows. */
+  formats?: readonly OutputFormat[];
 }
 
 export interface CommandSpec {
@@ -29,7 +31,16 @@ export interface CommandSpec {
   flags?: FlagSpec[];
   examples?: string[];
   subcommands?: CommandSpec[];
+  /**
+   * The `-o` formats this command can write. An explicit format always wins (REQ-050), so one the
+   * command cannot honour is refused rather than quietly replaced by another. Omitted: a document,
+   * which has no rows for csv, tsv or name to write — see DOCUMENT_FORMATS.
+   */
+  formats?: readonly OutputFormat[];
 }
+
+/** What a command that prints a document (a status, an entity, a description) can write. */
+export const DOCUMENT_FORMATS: readonly OutputFormat[] = ["table", "json", "ndjson"];
 
 export const GLOBAL_FLAGS: FlagSpec[] = [
   { name: "url", arg: "<url>", summary: "Target application base URL (or SIGNUM_URL)" },
@@ -137,6 +148,7 @@ export const COMMANDS: CommandSpec[] = [
     summary: "List the types the application exposes: entities, enums, symbols",
     usage: "signum types [<pattern>] [--kind <kind>]",
     milestone: "m1",
+    formats: OUTPUT_FORMATS,
     description:
       "Reflection lists more than entities: enums, messages, queries and symbol containers " +
       "(operations and permissions are symbols). `signum explain <Type>` shows an enum's values " +
@@ -150,6 +162,7 @@ export const COMMANDS: CommandSpec[] = [
     summary: "List the queries the application exposes",
     usage: "signum queries [<pattern>]",
     milestone: "m1",
+    formats: OUTPUT_FORMATS,
     examples: ["signum queries"],
   },
   {
@@ -157,6 +170,7 @@ export const COMMANDS: CommandSpec[] = [
     summary: "List invokable operations, with shadowed verbs flagged",
     usage: "signum operations [<Type>]",
     milestone: "m1",
+    formats: OUTPUT_FORMATS,
     description:
       "Read-only discovery, so it ships in m1 even though invoking an operation is m2. " +
       "An operation whose verb collides with a built-in is marked SHADOWED and remains " +
@@ -193,6 +207,7 @@ export const COMMANDS: CommandSpec[] = [
     summary: "Run a dynamic query",
     usage: "signum query <queryKey> [--filter <expr>] [--column <token>] [--order <token>]",
     milestone: "m1",
+    formats: OUTPUT_FORMATS,
     description:
       "Results, totals and --count include only the rows your permissions allow. The server " +
       "removes the others silently and the response carries no marker that it did, so a result " +
@@ -208,8 +223,10 @@ export const COMMANDS: CommandSpec[] = [
       { name: "all", summary: "Fetch every row, unbounded — only one of --top/--page/--all at a time" },
       { name: "group", summary: "Set groupResults; required for aggregate tokens (Total.Sum, …)" },
       { name: "count", summary: "Return only the row count" },
-      { name: "lites", summary: "Return matching entity references (api/query/lites); --top/--all set the count" },
-      { name: "entities", summary: "Return matching whole entities (api/query/entities); json or ndjson" },
+      { name: "lites", summary: "Return matching entity references (api/query/lites); --top/--all set the count",
+        formats: ["table", "json", "ndjson", "name"] },
+      { name: "entities", summary: "Return matching whole entities (api/query/entities); json or ndjson",
+        formats: DOCUMENT_FORMATS },
       { name: "resolve", summary: "Show entity columns by name instead of Type;id (adds .ToString)" },
       { name: "as-command", summary: "Print the command for a human to run; emit no data (REQ-078)" },
     ],
@@ -403,6 +420,33 @@ export function findCommand(path: readonly string[]): CommandSpec | undefined {
     list = found.subcommands ?? [];
   }
   return found;
+}
+
+/** What a command path can write with the flags in use, and what limited it. */
+export interface FormatSupport {
+  formats: readonly OutputFormat[];
+  /** The flags in use that narrowed the command's own formats, e.g. `lites`. */
+  narrowedBy: string[];
+  /** The command declares no formats of its own: it prints a document, not rows. */
+  document: boolean;
+}
+
+/**
+ * The formats `path` can write: its own list, else its command's, else a document's, narrowed by
+ * every flag in use that declares formats of its own.
+ */
+export function formatSupport(path: readonly string[], used: (flag: string) => boolean = () => false): FormatSupport {
+  const spec = findCommand(path);
+  const declared = spec?.formats ?? findCommand(path.slice(0, 1))?.formats;
+  let formats = declared ?? DOCUMENT_FORMATS;
+  const narrowedBy: string[] = [];
+  for (const f of spec?.flags ?? []) {
+    const own = f.formats;
+    if (own === undefined || !used(f.name)) continue;
+    formats = formats.filter((format) => own.includes(format));
+    narrowedBy.push(f.name);
+  }
+  return { formats, narrowedBy, document: declared === undefined };
 }
 
 function renderFlags(flags: readonly FlagSpec[]): string[] {
@@ -654,6 +698,7 @@ export function helpAsJson(scope?: CommandSpec): unknown {
     description: c.description ?? null,
     flags: c.flags ?? [],
     examples: c.examples ?? [],
+    formats: c.formats ?? DOCUMENT_FORMATS,
     subcommands: (c.subcommands ?? []).map(strip),
   });
   if (scope !== undefined) return strip(scope);

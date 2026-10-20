@@ -28,16 +28,8 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
     });
   }
 
-  // H3 (Brooks review): an entity is a document, not a table. csv/tsv/name have no meaning
-  // for it, and silently coercing them to JSON hands a pipeline malformed data with no signal.
-  // Reject them explicitly, up front (a format mistake should not cost a network round trip).
-  // `table` is exempt: it is the *default* off a non-TTY resolution, not a user request, and
-  // renderDocument already maps it to JSON for the human-on-a-TTY case.
-  if (ctx.args.flags.output === "csv" || ctx.args.flags.output === "tsv" || ctx.args.flags.output === "name") {
-    throw new UsageError(`get does not support --output ${ctx.args.flags.output}`, {
-      hint: "An entity is a document, not a table. Use --output json (default) or ndjson.",
-    });
-  }
+  // csv, tsv and name are refused before this runs (H3, REQ-050): an entity is a document, and
+  // `get` declares only the document formats. `table` renders as JSON below.
 
   // AC-53.2: a `ref:` handle is accepted wherever a Lite is, and resolved LOCALLY — the handle
   // itself must never reach the server, and an unresolvable one must fail here rather than be

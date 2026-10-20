@@ -10,7 +10,7 @@
 
 import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, NotFoundError, UsageError } from "../core/errors.ts";
-import { renderDocument } from "../core/output.ts";
+import { listingShape, renderDocument, renderListing } from "../core/output.ts";
 import { isBuiltIn } from "../core/args.ts";
 import {
   findType, isEntityTypeInfo, loadMetadata, queryableTypes, suggestTypes, TYPE_KINDS, type Metadata, type OperationInfo, type TypeInfo,
@@ -50,6 +50,22 @@ function memberNoun(t: TypeInfo): string {
     : "members";
 }
 
+// One row of each listing, and its columns in output order: csv and tsv write these as the header,
+// json and ndjson as the keys, and `-o name` the named one.
+interface TypeRow {
+  name: string; kind: string | null; entityKind: string | null; niceName: string | null;
+  members: number; operations: number; hasQuery: boolean;
+}
+const TYPE_LISTING = listingShape<TypeRow>(
+  { name: true, kind: true, entityKind: true, niceName: true, members: true, operations: true, hasQuery: true }, "name",
+);
+interface QueryRow { queryKey: string; niceName: string | null }
+const QUERY_LISTING = listingShape<QueryRow>({ queryKey: true, niceName: true }, "queryKey");
+interface OperationRow { type: string; key: string; verb: string; command: string; shadowed: boolean; niceName: string | null }
+const OPERATION_LISTING = listingShape<OperationRow>(
+  { type: true, key: true, verb: true, command: true, shadowed: true, niceName: true }, "key",
+);
+
 function listTypes(ctx: Ctx, md: Metadata, pattern: string | undefined): ExitCode {
   const wanted = pattern?.toLowerCase();
   const kindFlag = opt(ctx, "kind");
@@ -64,12 +80,13 @@ function listTypes(ctx: Ctx, md: Metadata, pattern: string | undefined): ExitCod
     .filter((t) => kind === undefined || t.kind === kind)
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  if (ctx.format === "json" || ctx.format === "ndjson") {
-    renderDocument(
-      rows.map((t) => ({
+  if (ctx.format !== "table") {
+    renderListing(
+      rows.map((t): TypeRow => ({
         name: t.name, kind: t.kind ?? null, entityKind: t.entityKind ?? null, niceName: t.niceName ?? null,
         members: t.members.length, operations: t.operations.length, hasQuery: t.hasQuery,
       })),
+      TYPE_LISTING,
       { format: ctx.format, write: ctx.io.out },
     );
     return ExitCode.Ok;
@@ -95,8 +112,8 @@ function listQueries(ctx: Ctx, md: Metadata, pattern: string | undefined): ExitC
   const rows = queryableTypes(md)
     .filter((t) => wanted === undefined || t.name.toLowerCase().includes(wanted));
 
-  if (ctx.format === "json" || ctx.format === "ndjson") {
-    renderDocument(rows.map((t) => ({ queryKey: t.name, niceName: t.niceName ?? null })),
+  if (ctx.format !== "table") {
+    renderListing(rows.map((t): QueryRow => ({ queryKey: t.name, niceName: t.niceName ?? null })), QUERY_LISTING,
       { format: ctx.format, write: ctx.io.out });
     return ExitCode.Ok;
   }
@@ -123,7 +140,7 @@ function listOperations(ctx: Ctx, md: Metadata, typeName: string | undefined): E
   }
 
   const rows = types.flatMap((t) =>
-    t.operations.map((op) => ({
+    t.operations.map((op): OperationRow => ({
       type: t.name,
       key: op.key,
       verb: op.verb,
@@ -134,8 +151,8 @@ function listOperations(ctx: Ctx, md: Metadata, typeName: string | undefined): E
     })),
   ).sort((a, b) => a.type.localeCompare(b.type) || a.verb.localeCompare(b.verb));
 
-  if (ctx.format === "json" || ctx.format === "ndjson") {
-    renderDocument(rows, { format: ctx.format, write: ctx.io.out });
+  if (ctx.format !== "table") {
+    renderListing(rows, OPERATION_LISTING, { format: ctx.format, write: ctx.io.out });
     return ExitCode.Ok;
   }
 

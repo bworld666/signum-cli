@@ -1539,6 +1539,70 @@ describe("colour (AC-22.1, QA finding)", () => {
   });
 });
 
+describe("an explicit format always wins, or is refused (REQ-050)", () => {
+  it("`types -o csv` writes CSV with the json columns as its header, even on a TTY", async () => {
+    const r = await cli(["types", "--url", baseUrl, "-o", "csv"], { tty: true });
+    expect(r.code).toBe(ExitCode.Ok);
+    const [header, ...rows] = r.out.trimEnd().split("\n");
+    const json = JSON.parse((await cli(["types", "--url", baseUrl, "--json"])).out) as Array<Record<string, unknown>>;
+    expect(header).toBe(Object.keys(json[0] as object).join(","));
+    expect(rows.length).toBe(json.length);
+    expect(rows).toContain("Order,Entity,Main,Order,4,2,true");
+  });
+
+  it("`types -o tsv` separates with tabs, and an empty match still has its header", async () => {
+    const r = await cli(["types", "zzz-nomatch", "--url", baseUrl, "-o", "tsv"]);
+    expect(r.code).toBe(ExitCode.Ok);
+    expect(r.out).toBe("name\tkind\tentityKind\tniceName\tmembers\toperations\thasQuery\n");
+  });
+
+  it("`-o name` prints one name per line: a type, a query key, an operation key", async () => {
+    expect((await cli(["types", "Ord", "--url", baseUrl, "-o", "name"])).out).toBe("Order\nOrderState\n");
+    expect((await cli(["queries", "--url", baseUrl, "-o", "name"])).out.split("\n")).toContain("Order");
+    expect((await cli(["operations", "Order", "--url", baseUrl, "-o", "name"])).out.split("\n")).toContain("OrderOperation.Ship");
+  });
+
+  it("a document command refuses csv, tsv and name before sending anything", async () => {
+    for (const argv of [["explain", "Order"], ["version"], ["auth", "status"], ["cache", "path"]]) {
+      const r = await cli([...argv, "--url", baseUrl, "-o", "csv"]);
+      expect(r.code).toBe(ExitCode.Usage);
+      expect(r.err).toContain("does not support --output csv");
+      expect(r.err).toContain("table, json, ndjson");
+    }
+  });
+
+  it("a listing's ndjson is one row per line, as a query's is (AC-22.5)", async () => {
+    const json = JSON.parse((await cli(["types", "--url", baseUrl, "--json"])).out) as unknown[];
+    const lines = (await cli(["types", "--url", baseUrl, "-o", "ndjson"])).out.trimEnd().split("\n");
+    expect(lines.length).toBe(json.length);
+    expect(lines.map((l) => JSON.parse(l) as unknown)).toEqual(json);
+  });
+
+  it("a flag narrows its command's formats: --lites has no csv, --entities no name", async () => {
+    const lites = await cli(["query", "Order", "--lites", "-o", "csv", "--url", baseUrl], { tty: true });
+    expect(lites.code).toBe(ExitCode.Usage);
+    expect(lites.err).toContain("'query --lites' does not support --output csv");
+    expect(lites.err).toContain("Use --output table, json, ndjson, name.");
+    const entities = await cli(["query", "Order", "--entities", "-o", "name", "--url", baseUrl], { tty: true });
+    expect(entities.err).toContain("'query --entities' does not support --output name");
+    expect(entities.err).not.toContain("prints a document");
+  });
+
+  it("help is a document too: csv, tsv and name are refused, json still works", async () => {
+    expect((await cli(["help", "-o", "csv"])).code).toBe(ExitCode.Usage);
+    expect((await cli(["get", "--help", "-o", "tsv"])).code).toBe(ExitCode.Usage);
+    expect((await cli(["get", "--help", "-o", "json"])).code).toBe(ExitCode.Ok);
+  });
+
+  it("structured help names each command's formats", async () => {
+    const help = JSON.parse((await cli(["help", "--json"])).out) as { commands: Array<{ name: string; formats: string[] }> };
+    expect(help.commands.find((c) => c.name === "types")?.formats).toEqual(["table", "json", "csv", "tsv", "ndjson", "name"]);
+    expect(help.commands.find((c) => c.name === "get")?.formats).toEqual(["table", "json", "ndjson"]);
+    const query = help.commands.find((c) => c.name === "query") as unknown as { flags: Array<{ name: string; formats?: string[] }> };
+    expect(query.flags.find((f) => f.name === "lites")?.formats).toEqual(["table", "json", "ndjson", "name"]);
+  });
+});
+
 describe("get (STORY-30)", () => {
   it("retrieves by type and id", async () => {
     const r = await cli(["get", "Order", "42", "--json"]);
