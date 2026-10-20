@@ -1,0 +1,49 @@
+# Changelog
+
+Notable changes to signum-cli. Versions are [SemVer](https://semver.org/), and `package.json` is the
+source of truth: a release tag `v<version>` must match it (see the README's release section).
+
+## 0.2.0 — 2026-10-20
+
+The first full release: milestone **m1**, the read-only core. It follows the pre-releases
+`0.1.0-b.1` to `0.1.0-b.5`. Every m1 requirement was run against a live Signum application before
+release (REQ-077, `test/*.live.test.ts`); the one exception is noted under exit codes.
+
+### Commands
+
+- `auth login | status | logout`: the browser token handoff, one stored credential per target, and
+  `SIGNUM_TOKEN` for non-interactive runs. A token the server rotates is stored.
+- `instance add | list | remove`: register a target by name and use it with `-i <name>`.
+- `types`, `queries`, `operations`, `explain`: discovery from the application's reflection
+  metadata, including enums, symbols and query tokens.
+- `query`: filters, columns, orders, paging and counts, plus `--lites` and `--entities`. Tokens and
+  filter values are checked before anything is sent.
+- `get`: retrieve an entity by type and id or by Lite key, or check it with `--exists`.
+- `unmask`: turn pseudonymized handles back into the records they stand for, locally.
+- `cache`, `version`.
+
+### Behaviour
+
+- **Output:** a table at a terminal and JSON in a pipe. `-o table|json|csv|tsv|ndjson|name` always
+  wins, or is refused (exit 2) by a command that cannot write that format. Honours `NO_COLOR`.
+  Data goes to stdout and diagnostics to stderr.
+- **Exit codes 0–9** ([CLI surface §5](docs/design/cli-surface.md)). "Not authenticated" (3) and
+  "not authorized" (4) are told apart even though the server answers 403 for both. Exit 4 is
+  covered by the offline tests only: the live application's login was denied nothing.
+- **AI callers** are detected, and row data reaches them only pseudonymized
+  ([ADR 0007](docs/decisions/0007-ai-caller-detection-and-pseudonymization.md)). Detection is not a
+  security boundary.
+- **Metadata cache:** per target, revalidated with `If-Modified-Since`, anonymous and logged-in
+  documents kept apart, and usable `--offline`.
+- **Without a login,** an application with Signum.Authorization shows no entity at all. The CLI says
+  so, and points to `signum auth login` rather than calling a hidden type unknown.
+- **Help** works with no configuration, credential or network. `-o json` gives structured help.
+
+### Known limitations
+
+- Read only: saving entities and executing operations are milestone m2.
+- `signum query <key> --help` shows the command's static help; help per query is m2. Use
+  `signum explain <Query>` meanwhile.
+- The binaries are not signed with a Developer ID or notarized, so macOS quarantines a downloaded
+  one (REQ-073, #43).
+- No license has been chosen yet (`package.json`: `UNLICENSED`).

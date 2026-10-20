@@ -9,7 +9,7 @@
  * describes, and its rows are never pseudonymized. They stay in memory, and every assertion compares
  * a boolean or a code, so a failure cannot print one (runbook rule 2). Read only.
  *
- *   SIGNUM_LIVE_INSTANCE=renew ./node_modules/.bin/bun test test/terminal.live.test.ts
+ *   SIGNUM_LIVE_INSTANCE=<name> ./node_modules/.bin/bun test test/terminal.live.test.ts
  */
 
 import { afterAll, describe, expect, it } from "bun:test";
