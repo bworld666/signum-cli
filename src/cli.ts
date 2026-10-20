@@ -28,6 +28,8 @@ import type { Ctx, Io } from "./core/ctx.ts";
 function showHelp(args: ParsedArgs, io: Io): ExitCode {
   // Help is human-facing text, so prose is the default even when piped — unlike data
   // output, which switches to JSON off a TTY. Structured help must be asked for (AC-62.1).
+  // Help is a document whatever it describes, so csv, tsv and name are refused as anywhere else.
+  assertFormatSupported(args, ["help"]);
   const explicit = args.flags.output;
   const asJson = explicit === "json" || explicit === "ndjson";
   const format: OutputFormat = asJson ? explicit : "table";

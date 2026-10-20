@@ -263,25 +263,37 @@ export function renderDocument(value: unknown, opts: DocumentOptions): void {
 }
 
 /** A metadata listing's columns, in order, and the one `-o name` prints. */
-export interface ListingShape {
-  columns: readonly string[];
-  name: string;
+export interface ListingShape<Row> {
+  columns: ReadonlyArray<keyof Row & string>;
+  name: keyof Row & string;
+}
+
+/**
+ * The shape of a listing of `Row`s. `columns` names every key of `Row`, in output order, and a key
+ * missing or extra does not compile — so csv and tsv cannot drift from json.
+ */
+export function listingShape<Row>(columns: { readonly [K in keyof Row]: true }, name: keyof Row & string): ListingShape<Row> {
+  return { columns: Object.keys(columns) as Array<keyof Row & string>, name };
 }
 
 /**
  * Render a NON-DATA listing (the names, kinds and counts `types`, `queries` and `operations` read
- * from metadata) in a machine format. json and ndjson are the listing as one document; csv and tsv
- * carry `shape.columns` as a header, even with no rows; `name` prints one `shape.name` per line.
- * `table` is not here: each listing aligns its own text.
+ * from metadata) in a machine format. json is the listing as one array; ndjson is one row per line,
+ * as for a query's rows (AC-22.5); csv and tsv carry `shape.columns` as a header, even with no rows;
+ * `name` prints one `shape.name` per line. `table` is not here: each listing aligns its own text.
  */
-export function renderListing(
-  rows: ReadonlyArray<Record<string, unknown>>,
-  shape: ListingShape,
+export function renderListing<Row>(
+  rows: readonly Row[],
+  shape: ListingShape<Row>,
   opts: { format: Exclude<OutputFormat, "table">; write: (chunk: string) => void },
 ): void {
   const { format, write } = opts;
-  if (format === "json" || format === "ndjson") {
+  if (format === "json") {
     writeDocument(rows, format, write);
+    return;
+  }
+  if (format === "ndjson") {
+    for (const row of rows) write(JSON.stringify(row) + "\n");
     return;
   }
   if (format === "name") {

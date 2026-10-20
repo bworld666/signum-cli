@@ -91,7 +91,8 @@ describe.skipIf(live === undefined || process.platform === "win32")("output in a
     expect(isJson(j.screen)).toBe(true);
     const c = await inTerminal(["types", "-o", "csv"]);
     expect(c.screen.startsWith("name,kind,entityKind,")).toBe(true);
-    expect(j.screen.includes(ESC) || c.screen.includes(ESC)).toBe(false);
+    expect(j.screen.includes(ESC)).toBe(false);
+    expect(c.screen.includes(ESC)).toBe(false);
   });
 
   it("into a pipe, `query` and `types` are JSON; asking for a table gets one, uncoloured", async () => {

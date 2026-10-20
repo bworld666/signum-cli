@@ -40,13 +40,8 @@ export function requestedVariant(ctx: Ctx): Variant | undefined {
       hint: `api/query/${variant} takes filters, an order and a count only. Use --top or --all for the count.`,
     });
   }
-  // A table of references or documents has no csv/tsv shape; `name` is a list of Lite keys.
-  const format = ctx.args.flags.output;
-  if (format === "csv" || format === "tsv" || (variant === "entities" && format === "name")) {
-    throw new UsageError(`--${variant} does not support --output ${format}`, {
-      hint: variant === "lites" ? "Use --output json, ndjson or name." : "Use --output json or ndjson.",
-    });
-  }
+  // csv and tsv (and name, for --entities) are refused before this runs: each flag declares its
+  // formats in help.ts, since references and documents have no rows to write.
   return variant;
 }
 

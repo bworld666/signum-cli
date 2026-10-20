@@ -14,7 +14,7 @@
 
 import { UsageError, type ExitCode } from "./errors.ts";
 import { parseOutputFormat, type OutputFormat } from "./output.ts";
-import { COMMANDS, findCommand, formatsOf, knownFlagNames } from "./help.ts";
+import { COMMANDS, findCommand, formatSupport, knownFlagNames } from "./help.ts";
 import { nearest } from "./text.ts";
 
 /**
@@ -302,9 +302,12 @@ export interface ExitSignal {
  */
 export function assertFormatSupported(args: ParsedArgs, path: readonly string[]): void {
   const asked = args.flags.output;
-  const formats = formatsOf(path);
-  if (asked === undefined || formats.includes(asked)) return;
-  throw new UsageError(`'${path.join(" ")}' does not support --output ${asked}`, {
-    hint: `Use --output ${formats.join(", ")}: \`signum ${path.join(" ")}\` prints a document, not rows.`,
+  if (asked === undefined) return;
+  const support = formatSupport(path, (f) => args.booleans.has(f) || args.options.has(f));
+  if (support.formats.includes(asked)) return;
+  const subject = [...path, ...support.narrowedBy.map((f) => `--${f}`)].join(" ");
+  throw new UsageError(`'${subject}' does not support --output ${asked}`, {
+    hint: `Use --output ${support.formats.join(", ")}` +
+      (support.document ? `: \`signum ${subject}\` prints a document, not rows.` : "."),
   });
 }

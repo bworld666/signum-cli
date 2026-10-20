@@ -18,6 +18,8 @@ export interface FlagSpec {
   alias?: string;
   arg?: string;
   summary: string;
+  /** When given, this flag narrows its command's formats to these — `--lites` returns references, not rows. */
+  formats?: readonly OutputFormat[];
 }
 
 export interface CommandSpec {
@@ -221,8 +223,10 @@ export const COMMANDS: CommandSpec[] = [
       { name: "all", summary: "Fetch every row, unbounded — only one of --top/--page/--all at a time" },
       { name: "group", summary: "Set groupResults; required for aggregate tokens (Total.Sum, …)" },
       { name: "count", summary: "Return only the row count" },
-      { name: "lites", summary: "Return matching entity references (api/query/lites); --top/--all set the count" },
-      { name: "entities", summary: "Return matching whole entities (api/query/entities); json or ndjson" },
+      { name: "lites", summary: "Return matching entity references (api/query/lites); --top/--all set the count",
+        formats: ["table", "json", "ndjson", "name"] },
+      { name: "entities", summary: "Return matching whole entities (api/query/entities); json or ndjson",
+        formats: DOCUMENT_FORMATS },
       { name: "resolve", summary: "Show entity columns by name instead of Type;id (adds .ToString)" },
       { name: "as-command", summary: "Print the command for a human to run; emit no data (REQ-078)" },
     ],
@@ -418,9 +422,31 @@ export function findCommand(path: readonly string[]): CommandSpec | undefined {
   return found;
 }
 
-/** The formats a command path can write: its own list, else its command's, else a document's. */
-export function formatsOf(path: readonly string[]): readonly OutputFormat[] {
-  return findCommand(path)?.formats ?? findCommand(path.slice(0, 1))?.formats ?? DOCUMENT_FORMATS;
+/** What a command path can write with the flags in use, and what limited it. */
+export interface FormatSupport {
+  formats: readonly OutputFormat[];
+  /** The flags in use that narrowed the command's own formats, e.g. `lites`. */
+  narrowedBy: string[];
+  /** The command declares no formats of its own: it prints a document, not rows. */
+  document: boolean;
+}
+
+/**
+ * The formats `path` can write: its own list, else its command's, else a document's, narrowed by
+ * every flag in use that declares formats of its own.
+ */
+export function formatSupport(path: readonly string[], used: (flag: string) => boolean = () => false): FormatSupport {
+  const spec = findCommand(path);
+  const declared = spec?.formats ?? findCommand(path.slice(0, 1))?.formats;
+  let formats = declared ?? DOCUMENT_FORMATS;
+  const narrowedBy: string[] = [];
+  for (const f of spec?.flags ?? []) {
+    const own = f.formats;
+    if (own === undefined || !used(f.name)) continue;
+    formats = formats.filter((format) => own.includes(format));
+    narrowedBy.push(f.name);
+  }
+  return { formats, narrowedBy, document: declared === undefined };
 }
 
 function renderFlags(flags: readonly FlagSpec[]): string[] {
