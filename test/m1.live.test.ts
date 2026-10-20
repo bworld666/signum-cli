@@ -134,6 +134,48 @@ describe.skipIf(!configured)("m1 against a live app (REQ-077)", () => {
     expect(r.err.includes("pseudonymized")).toBe(true);
   });
 
+  // The filters below name the entity by its own id, so they need its type's own query.
+  const ownQuery = (): boolean => queryKey === lite!.type || queryKey === lite!.type.replace(/Entity$/, "");
+  const numericIds = (): boolean => /^\d+$/.test(lite!.id);
+  const count = async (filter: string): Promise<number> => {
+    const r = await cli(["query", queryKey as string, "--filter", filter, "--count", "--json"]);
+    expect(r.code).toBe(ExitCode.Ok);
+    return Number(String((json(r) as { count: unknown }).count));
+  };
+
+  it("filters (REQ-021): equality, grouping, negation and in select exactly what they say", async () => {
+    if (!ownQuery()) return;
+    const id = JSON.stringify(lite!.id); // quoted: a GUID is not a bareword, and a quoted number still converts
+    expect(await count(`Id = ${id}`)).toBe(1);
+    expect(await count(`(Id = ${id} or Id = ${id}) and Id != ${id}`)).toBe(0);
+    expect(await count(`Id in ${id}`)).toBe(1);
+  });
+
+  it("order (REQ-021): --order -Id sorts descending", async () => {
+    if (!numericIds()) return; // GUID order is the database's, not comparable here
+    const rows = json(await cli(["query", queryKey as string, "--column", "Id", "--order", "-Id", "--top", "5", "--json"])) as Array<{ Id: unknown }>;
+    const ids = rows.map((r) => Number(r.Id));
+    expect(ids.every((v, i) => i === 0 || v <= ids[i - 1]!)).toBe(true);
+  });
+
+  it("a mistyped token or value is a usage error, never a server fault (REQ-051/052)", async () => {
+    const token = await cli(["query", queryKey as string, "--filter", "NoSuchToken_ = 1", "--count"]);
+    expect(token.code).toBe(ExitCode.Usage);
+    expect(token.err.includes("invalid query token")).toBe(true);
+    if (ownQuery() && numericIds()) {
+      const value = await cli(["query", queryKey as string, "--filter", "Id > notanumber", "--count"]);
+      expect(value.code).toBe(ExitCode.Usage);
+    }
+  });
+
+  it("a missing entity is exit 5 with a message, never a bare status (REQ-051/052)", async () => {
+    const missing = numericIds() ? "2147483647" : "00000000-0000-0000-0000-000000000000";
+    const r = await cli(["get", lite!.type, missing]);
+    expect(r.code).toBe(ExitCode.NotFound);
+    expect(r.err.includes("not found")).toBe(true);
+    expect(/\b(404|500)\b/.test(r.err)).toBe(false);
+  });
+
   it("a bad token is exit 3 with the handoff steps, never a 401 (AC-08.1, AC-12.11)", async () => {
     let out = "", err = "";
     const io: Io = {

@@ -24,7 +24,7 @@ import { loadHandles } from "../core/handles.ts";
 import { emitCommandEcho } from "../core/commandline.ts";
 import { persistHandles } from "../core/handles.ts";
 import {
-  collectFilterTokens, lowerFilterExpressions, parseFilterExpression, type FilterWire,
+  collectFilterTokens, findFilterValueMismatch, lowerFilterExpressions, parseFilterExpression, type FilterWire,
 } from "../core/filter.ts";
 import { opt, optAll, flag } from "../core/ctx.ts";
 import { resolveTarget, type Target } from "../core/target.ts";
@@ -272,6 +272,16 @@ async function planColumns(
     const written = filterTokens[idx] ?? info.fullKey;
     throw new UsageError(`token '${written}' cannot be used in a filter: ${reason}`, {
       hint: "Restructure the filter to avoid it. Run `signum help filter` for the full syntax.",
+    });
+  }
+
+  // A value the server cannot read as its token's type is a 500 there (FilterJsonConverter.cs:100),
+  // though the mistake is the caller's: check it here, with the type parseTokens just gave us.
+  const typeByToken = new Map(filterTokens.map((t, i) => [t, filterInfo[i]?.filterType]));
+  const mismatch = findFilterValueMismatch(inputs.filters, (t) => typeByToken.get(t));
+  if (mismatch !== undefined) {
+    throw new UsageError(`filter on '${mismatch.token}' ${mismatch.problem}, got ${JSON.stringify(mismatch.value)}`, {
+      hint: "Run `signum explain " + queryKey + "` to see each token's type, and `signum help filter` for value syntax.",
     });
   }
 

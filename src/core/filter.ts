@@ -519,3 +519,63 @@ export function collectFilterTokens(filters: readonly FilterWire[]): string[] {
   walk(filters);
   return [...seen];
 }
+
+// ── value types ──────────────────────────────────────────────────────────────
+
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Why a value cannot be the type the server will convert it to, or undefined when it can (or
+ * when this cannot tell). The server reads each value as the token's own type — element-wise for
+ * `in` and `between` — except for text searches (`FilterCondition.GetValueType`, `Filter.cs:277-289`),
+ * and a value that does not convert comes back as a 500 (`FilterJsonConverter.cs:91-101`), not as
+ * the usage error it is. Only the types whose shape is certain are checked, leniently — a value is
+ * refused only when no reading could convert it. `null` is left to the server, which alone knows
+ * whether the column is nullable.
+ */
+function valueProblem(filterType: string, value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  switch (filterType) {
+    // A numeric STRING converts too: ASP.NET's web JSON defaults read numbers from strings
+    // (verified live: `Id > "0"` is accepted), so only a value that is no number at all is refused.
+    case "Integer":
+      return (typeof value === "number" && Number.isInteger(value)) || (typeof value === "string" && /^-?\d+$/.test(value.trim()))
+        ? undefined : "expects a whole number";
+    case "Decimal":
+      return typeof value === "number" || (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)))
+        ? undefined : "expects a number";
+    case "Boolean":
+      return typeof value === "boolean" || value === "true" || value === "false" ? undefined : "expects true or false";
+    case "Guid":
+      return typeof value === "string" && GUID.test(value) ? undefined : "expects a GUID";
+    default:
+      return undefined;
+  }
+}
+
+const UNTYPED_OPERATIONS = new Set<FilterOperationName>(["TsQuery", "TsQuery_Plain", "TsQuery_Phrase", "TsQuery_WebSearch", "SmartSearch"]);
+
+/**
+ * The first condition whose value cannot convert to its token's type, given each token's
+ * `filterType` (from `parseTokens`). Checked before sending so a typo is exit 2, not a server 500.
+ */
+export function findFilterValueMismatch(
+  filters: readonly FilterWire[],
+  filterTypeOf: (token: string) => string | undefined,
+): { token: string; value: unknown; problem: string } | undefined {
+  for (const node of filters) {
+    if ("filters" in node) {
+      const inner = findFilterValueMismatch(node.filters, filterTypeOf);
+      if (inner !== undefined) return inner;
+      continue;
+    }
+    if (UNTYPED_OPERATIONS.has(node.operation)) continue;
+    const type = filterTypeOf(node.token);
+    if (type === undefined) continue;
+    for (const v of Array.isArray(node.value) ? node.value : [node.value]) {
+      const problem = valueProblem(type, v);
+      if (problem !== undefined) return { token: node.token, value: v, problem };
+    }
+  }
+  return undefined;
+}
