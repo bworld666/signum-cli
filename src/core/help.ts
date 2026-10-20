@@ -33,6 +33,7 @@ export interface CommandSpec {
 
 export const GLOBAL_FLAGS: FlagSpec[] = [
   { name: "url", arg: "<url>", summary: "Target application base URL (or SIGNUM_URL)" },
+  { name: "instance", alias: "i", arg: "<name>", summary: "Target a registered instance (or SIGNUM_INSTANCE); see `signum instance`" },
   { name: "output", alias: "o", arg: "<fmt>", summary: `Output format: ${OUTPUT_FORMATS.join(", ")}` },
   { name: "json", summary: "Alias for --output json" },
   { name: "explain", summary: "Print the request instead of sending it (metadata may be fetched)" },
@@ -300,6 +301,53 @@ export const COMMANDS: CommandSpec[] = [
         usage: "signum cache path",
         milestone: "m1",
         examples: ["signum cache path", 'ls "$(signum cache path)"'],
+      },
+    ],
+  },
+  {
+    name: "instance",
+    summary: "Register short names for target applications, used as -i <name>",
+    usage: "signum instance <add|list|remove|path>",
+    milestone: "m2",
+    description:
+      "A registered name stands in for --url anywhere: `signum -i renew types`. The name defaults " +
+      "to the URL's first host label (https://renew.example.org/home → renew).\n\n" +
+      "Names are stored in instances.json in the config directory, owner-only. A stored login " +
+      "is still matched by URL, so -i reaches it exactly when --url with the same address would. " +
+      "Nothing here touches the network.",
+    examples: [
+      "signum instance add https://renew.example.org/home",
+      "signum instance add https://app.example.org staging",
+      "signum instance list",
+    ],
+    subcommands: [
+      {
+        name: "add",
+        summary: "Register a URL under a name (default: its first host label)",
+        usage: "signum instance add <url> [name]",
+        milestone: "m2",
+        examples: ["signum instance add https://renew.example.org/home", "signum instance add http://localhost:5000 local"],
+      },
+      {
+        name: "list",
+        summary: "List registered instances",
+        usage: "signum instance list",
+        milestone: "m2",
+        examples: ["signum instance list", "signum instance list --json"],
+      },
+      {
+        name: "remove",
+        summary: "Forget a name; the stored login, if any, is kept",
+        usage: "signum instance remove <name>",
+        milestone: "m2",
+        examples: ["signum instance remove renew"],
+      },
+      {
+        name: "path",
+        summary: "Print the instances file path, bare, for scripting",
+        usage: "signum instance path",
+        milestone: "m2",
+        examples: ["signum instance path"],
       },
     ],
   },

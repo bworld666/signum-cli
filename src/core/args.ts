@@ -34,6 +34,11 @@ export function builtInsSatisfyDispatchInvariant(): boolean {
 
 export interface GlobalFlags {
   url: string | undefined;
+  /**
+   * A registered instance name (`-i renew`), resolved to `url` in cli.ts once configuration may be
+   * read — never here, so parsing stays free of filesystem access (AC-60.2).
+   */
+  instance: string | undefined;
   output: OutputFormat | undefined;
   explain: boolean;
   verbose: boolean;
@@ -88,7 +93,7 @@ export interface ParsedArgs {
 }
 
 const FLAGS_WITH_VALUE = new Set([
-  "url", "output", "o", "timeout", "caller-context", "pseudonymize",
+  "url", "instance", "i", "output", "o", "timeout", "caller-context", "pseudonymize",
   "filter", "filter-json", "column", "order", "top", "page", "page-size",
   "context", "pseudonymize", "arg", "arg-string", "arg-lite", "arg-json",
   "lite", "id", "filename", "f",
@@ -109,6 +114,7 @@ export function flagSetsAreDisjoint(): boolean {
 function emptyFlags(): GlobalFlags {
   return {
     url: undefined,
+    instance: undefined,
     output: undefined,
     explain: false,
     verbose: false,
@@ -167,6 +173,7 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = proc
         case "no-color": flags.noColor = true; break;
         case "json": flags.output = "json"; break;
         case "url": flags.url = value; break;
+        case "instance": case "i": flags.instance = value; break;
         case "output": case "o": flags.output = parseOutputFormat(value as string); break;
         case "caller-context": flags.callerContext = value; break;
         case "i-understand-data-goes-to-a-model": flags.allowAgentData = true; break;
@@ -210,9 +217,17 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = proc
     const fromEnv = env["SIGNUM_CALLER_CONTEXT"];
     if (fromEnv !== undefined && fromEnv !== "") flags.callerContext = fromEnv;
   }
-  if (flags.url === undefined) {
-    const fromEnv = env["SIGNUM_URL"];
-    if (fromEnv !== undefined && fromEnv !== "") flags.url = fromEnv;
+  // Two explicit targets cannot both win, and picking one silently could send a command to the
+  // wrong application.
+  if (flags.url !== undefined && flags.instance !== undefined) {
+    throw new UsageError("--url and --instance both name a target; pass one");
+  }
+  // Explicit flags first, then the environment: an instance before a URL, matching the flags.
+  if (flags.url === undefined && flags.instance === undefined) {
+    const instance = env["SIGNUM_INSTANCE"];
+    const url = env["SIGNUM_URL"];
+    if (instance !== undefined && instance !== "") flags.instance = instance;
+    else if (url !== undefined && url !== "") flags.url = url;
   }
 
   // `--version` with no command IS the version command. Resolving it here rather than in cli.ts

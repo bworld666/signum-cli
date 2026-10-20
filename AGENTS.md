@@ -12,7 +12,7 @@ It is **not** a scaffolding or code-generation tool. That job already belongs to
 Do not rebuild those here.
 
 **Status: m1 (read-only core) implemented, pre-release.** Tagged `v0.1.0-b.1`…`b.5`. Commands:
-`auth`, `types`, `queries`, `operations`, `explain`, `query`, `get`, `unmask`, `cache`, `version`.
+`auth`, `types`, `queries`, `operations`, `explain`, `query`, `get`, `unmask`, `cache`, `instance`, `version`.
 No writes yet (m2). Entry point `src/cli.ts` dispatches to `src/commands/`; shared logic lives in
 `src/core/` — HTTP and the `X-ApiKey`/`New_Token` handling (`http.ts`), stored credentials
 (`config.ts`), the filter DSL (`filter.ts`), `ResultTable` de-interning

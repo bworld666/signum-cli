@@ -1,7 +1,7 @@
 /**
  * The signum config directory and the private-file writer every store in it uses.
  *
- * Stores: credentials.ts (REQ-006), metadata-cache.ts (REQ-010), handles.ts (REQ-058).
+ * Stores: credentials.ts (REQ-006), metadata-cache.ts (REQ-010), handles.ts (REQ-058), instances.ts (REQ-001).
  */
 
 import { chmodSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
