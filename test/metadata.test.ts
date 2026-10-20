@@ -39,7 +39,7 @@ describe("offline mode (AC-24.4, AC-61.3) — reachable only at the module level
     try {
       server = Bun.serve({
         port: 0,
-        fetch: () => new Response(JSON.stringify({ Order: { kind: "Main" } }), {
+        fetch: () => new Response(JSON.stringify({ Order: { kind: "Entity", entityKind: "Main" } }), {
           headers: { "content-type": "application/json", "last-modified": "Wed, 01 Jan 2026 00:00:00 GMT" },
         }),
       });
@@ -68,7 +68,7 @@ describe("automatic stale-cache fallback on network failure (AC-61.6) — the re
     try {
       server = Bun.serve({
         port: 0,
-        fetch: () => new Response(JSON.stringify({ Order: { kind: "Main" } }), {
+        fetch: () => new Response(JSON.stringify({ Order: { kind: "Entity", entityKind: "Main" } }), {
           headers: { "content-type": "application/json", "last-modified": "Wed, 01 Jan 2026 00:00:00 GMT" },
         }),
       });
@@ -128,8 +128,8 @@ describe("the metadata cache is scoped to the caller's auth state", () => {
           return new Response(
             // Anonymous sees no queryable types; authenticated sees Order.
             JSON.stringify(authenticated
-              ? { Order: { kind: "Main", queryDefined: true } }
-              : { Order: { kind: "Main" } }),
+              ? { Order: { kind: "Entity", entityKind: "Main", queryDefined: true } }
+              : { Order: { kind: "Entity", entityKind: "Main" } }),
             { headers: { "content-type": "application/json", "last-modified": "Wed, 01 Jan 2026 00:00:00 GMT" } },
           );
         },
@@ -164,7 +164,7 @@ describe("the metadata cache is scoped to the caller's auth state", () => {
         port: 0,
         fetch: (req) => req.headers.get("if-modified-since") !== null
           ? new Response(null, { status: 304 })
-          : new Response(JSON.stringify({ Order: { kind: "Main", queryDefined: true } }), {
+          : new Response(JSON.stringify({ Order: { kind: "Entity", entityKind: "Main", queryDefined: true } }), {
               headers: { "content-type": "application/json", "last-modified": "Wed, 01 Jan 2026 00:00:00 GMT" },
             }),
       });

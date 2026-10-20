@@ -9,7 +9,7 @@ import type { Ctx } from "../core/ctx.ts";
 import { ExitCode } from "../core/errors.ts";
 import { renderDocument } from "../core/output.ts";
 import { defaultCredentialUrl } from "../core/credentials.ts";
-import { SignumHttp } from "../core/http.ts";
+import { appVersionFrom, SignumHttp } from "../core/http.ts";
 
 // M4 (Brooks review): single source of truth — read the version from package.json rather
 // than a second hardcoded copy that silently drifts. Bun bundles the JSON import into the
@@ -20,7 +20,10 @@ export const CLI_VERSION: string = pkg.version;
 export async function runVersion(ctx: Ctx): Promise<ExitCode> {
   const url = ctx.args.flags.url ?? defaultCredentialUrl(ctx.io.env);
 
-  let server: { url: string; reachable: boolean; detail: string | undefined } | undefined;
+  let server: {
+    url: string; reachable: boolean; detail: string | undefined;
+    appVersion?: string | null; appBuildTime?: string | null;
+  } | undefined;
 
   if (url !== undefined) {
     const http = new SignumHttp({
@@ -39,7 +42,8 @@ export async function runVersion(ctx: Ctx): Promise<ExitCode> {
       const count = res.body !== null && typeof res.body === "object"
         ? Object.keys(res.body as Record<string, unknown>).length
         : 0;
-      server = { url, reachable: true, detail: `${count} types` };
+      const app = appVersionFrom(res.headers);
+      server = { url, reachable: true, detail: `${count} types`, appVersion: app.version ?? null, appBuildTime: app.buildTime ?? null };
     } catch (err) {
       server = { url, reachable: false, detail: err instanceof Error ? err.message : String(err) };
     }
@@ -54,7 +58,7 @@ export async function runVersion(ctx: Ctx): Promise<ExitCode> {
   if (server !== undefined) {
     ctx.io.out(
       server.reachable
-        ? `target  ${server.url} (reachable, ${server.detail})\n`
+        ? `target  ${server.url} (reachable, ${server.detail}${server.appVersion != null ? `, app ${server.appVersion}` : ""})\n`
         : `target  ${server.url} (unreachable: ${server.detail})\n`,
     );
   }

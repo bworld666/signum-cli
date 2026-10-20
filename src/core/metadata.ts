@@ -42,7 +42,13 @@ export interface OperationInfo {
 
 export interface TypeInfo {
   name: string;
+  /**
+   * What the type IS — `Entity`, `Enum`, `Message`, `Query` or `SymbolContainer` (KindOfType,
+   * `ReflectionServer.cs:629-636`). Not the entity kind: that is `entityKind`.
+   */
   kind: string | undefined;
+  /** For entities only: `Main`, `Part`, `String`, `System`, … (`TypeInfoTS.EntityKind`, `:469`). */
+  entityKind: string | undefined;
   niceName: string | undefined;
   members: MemberInfo[];
   operations: OperationInfo[];
@@ -92,6 +98,7 @@ export function parseMetadata(payload: unknown, origin: Metadata["origin"]): Met
       types.set(name.toLowerCase(), {
         name,
         kind: str(t["kind"]),
+        entityKind: str(t["entityKind"]),
         niceName: str(t["niceName"]),
         members: parseMembers(t["members"]),
         operations: parseOperations(t["operations"]),
@@ -101,6 +108,22 @@ export function parseMetadata(payload: unknown, origin: Metadata["origin"]): Met
   }
   return { types, origin };
 }
+
+/**
+ * Is this type an entity — something a member can REFERENCE, i.e. an identity?
+ *
+ * Reflection lists enums, messages and symbol containers next to entities, so "a type exists by
+ * this name" is not enough: an enum-typed member such as `State` would read as an identity.
+ */
+export function isEntityTypeInfo(t: TypeInfo | undefined): boolean {
+  return t?.kind === "Entity";
+}
+
+/** The `--kind` values `signum types` accepts, mapped to KindOfType. */
+export const TYPE_KINDS: Readonly<Record<string, string>> = {
+  entity: "Entity", enum: "Enum", message: "Message", query: "Query",
+  symbol: "SymbolContainer", symbolcontainer: "SymbolContainer",
+};
 
 /** Case- and kebab-insensitive type lookup (AC-41.7). */
 export function findType(md: Metadata, name: string): TypeInfo | undefined {

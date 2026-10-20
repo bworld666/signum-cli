@@ -120,6 +120,21 @@ function fieldErrors(body: unknown): string[] {
   return lines;
 }
 
+/**
+ * The application's version, from the headers every MVC action response carries (REQ-007).
+ *
+ * `VersionFilterAttribute` is a default filter (`SignumServer.cs:70`) and sets `X-App-Version` to the
+ * entry assembly's version and `X-App-BuildTime` to its build time (`VersionFilterAttribute.cs:20-26`).
+ * Absent on a response that started before the filter ran, so both are optional.
+ */
+export function appVersionFrom(headers: Headers): { version: string | undefined; buildTime: string | undefined } {
+  const pick = (name: string) => {
+    const v = headers.get(name);
+    return v !== null && v !== "" ? v : undefined;
+  };
+  return { version: pick("X-App-Version"), buildTime: pick("X-App-BuildTime") };
+}
+
 export class SignumHttp {
   constructor(private readonly opts: HttpOptions) {}
 
