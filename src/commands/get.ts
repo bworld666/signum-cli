@@ -86,9 +86,10 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
   // The server addresses entities by clean name (`RoleEntity` → `Role`) (AC-30.4).
   const cleanName = type.name.replace(/Entity$/, "");
   const existsOnly = flag(ctx, "exists");
-  const path = existsOnly
-    ? `api/exists/${encodeURIComponent(cleanName)}/${encodeURIComponent(id)}`
-    : entityPath(cleanName, id);
+  const pathFor = (key: string): string => existsOnly
+    ? `api/exists/${encodeURIComponent(cleanName)}/${encodeURIComponent(key)}`
+    : entityPath(cleanName, key);
+  const path = pathFor(id);
 
   if (flag(ctx, "as-command")) {
     emitCommandEcho(ctx); // REQ-078 — see the note in query.ts
@@ -96,8 +97,9 @@ export async function runGet(ctx: Ctx): Promise<ExitCode> {
   }
 
   if (ctx.args.flags.explain) {
-    // Behind a handle the path would spell out the real id, so show the handle in its place.
-    const shown = viaHandle ? path.replace(new RegExp(`/${encodeURIComponent(id)}$`), `/${first}`) : path;
+    // Behind a handle the path would spell out the real id, so show the handle in its place. Built,
+    // not substituted: a pattern made from the id misses when the id holds a regex character.
+    const shown = viaHandle ? pathFor(first) : path;
     renderDocument({ method: "GET", url: `${target.url}/${shown}`, ...(viaHandle ? { id: "resolved locally from the handle" } : {}) },
       { format: ctx.format === "table" ? "json" : ctx.format, write: ctx.io.out });
     return ExitCode.Ok;

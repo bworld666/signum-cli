@@ -1824,6 +1824,19 @@ describe("ref: handles, end to end (REQ-058)", () => {
       rmSync(d, { recursive: true, force: true });
     });
 
+    it("in --explain, whatever characters the id holds", async () => {
+      // A string key with regex characters: substituting the id by pattern missed it and printed it.
+      const d = profile();
+      saveHandles({ "ref_cccccccccccc": "Order;a(b).c*" }, { SIGNUM_CONFIG_DIR: d } as unknown as NodeJS.ProcessEnv);
+      for (const extra of [[], ["--exists"]]) {
+        const r = await cli(["get", "ref_cccccccccccc", "--explain", ...extra], agent(d));
+        expect(r.code).toBe(ExitCode.Ok);
+        expect(r.out).toContain("/Order/ref_cccccccccccc");
+        expect(r.out).not.toContain("a(b)");
+      }
+      rmSync(d, { recursive: true, force: true });
+    });
+
     it("in a not-found error", async () => {
       const d = withHandles();
       const r = await cli(["get", "ref_bbbbbbbbbbbb"], agent(d));
