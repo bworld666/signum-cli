@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "bun:test";
 import {
-  lowerFilterExpressions, parseFilterExpression,
+  findFilterValueMismatch, lowerFilterExpressions, parseFilterExpression,
   type FilterConditionWire, type FilterGroupWire, type FilterOperationName,
 } from "../src/core/filter.ts";
 import { UsageError } from "../src/core/errors.ts";
@@ -348,5 +348,30 @@ describe("filter errors route to the help that resolves them (AC-63.2)", () => {
   it("an empty expression routes too — it previously carried no hint at all", () => {
     const e = failure("   ");
     expect(e.hint).toContain("signum help filter");
+  });
+});
+
+describe("value types (REQ-052)", () => {
+  const types: Record<string, string> = { Id: "Integer", Total: "Decimal", Active: "Boolean", Key: "Guid", Name: "String" };
+  const check = (expr: string) => findFilterValueMismatch(lowerOne(expr), (t) => types[t]);
+
+  it("accepts values that convert, numeric strings included", () => {
+    for (const ok of ["Id = 42", 'Id = "42"', "Total > 1.5", 'Total > "2.25"', "Active = true",
+      "Key = 0f8fad5b-d9cb-469f-a165-70867728950e", "Name = abc", "Id = null", "Id in 1,2,3"]) {
+      expect(check(ok)).toBeUndefined();
+    }
+  });
+
+  it("finds the first value that cannot, inside lists and groups too", () => {
+    expect(check("Id = abc")).toEqual({ token: "Id", value: "abc", problem: "expects a whole number" });
+    expect(check("Id = 1.5")?.problem).toBe("expects a whole number");
+    expect(check("Name = a and (Total > 1 or Total > lots)")?.value).toBe("lots");
+    expect(check("Id in 1,x,3")?.value).toBe("x");
+    expect(check("Active = maybe")?.problem).toBe("expects true or false");
+    expect(check("Key = 42")?.problem).toBe("expects a GUID");
+  });
+
+  it("leaves unknown types and text searches to the server", () => {
+    expect(findFilterValueMismatch(lowerOne("Other = abc"), (t) => types[t])).toBeUndefined();
   });
 });

@@ -16,10 +16,9 @@ import {
 import { appVersionFrom, SignumHttp } from "../core/http.ts";
 import { flag } from "../core/ctx.ts";
 import { resolveTarget } from "../core/target.ts";
-import { handoffInstructions } from "../core/handoff.ts";
+import { handoffInstructions, loginCommand } from "../core/handoff.ts";
 
 /** Generic form, for error hints where no target URL is known (`auth status` on a fresh install). */
-const HANDOFF_INSTRUCTIONS = handoffInstructions();
 
 /**
  * The interactive preamble, shaped after `aws login --remote`.
@@ -53,6 +52,7 @@ async function login(ctx: Ctx): Promise<ExitCode> {
       hint: "signum auth login --url https://app.example --with-token",
     });
   }
+  const handoff = handoffInstructions(url, ctx.args.flags.instance);
 
   // A token given as an ARGUMENT is refused, loudly. `--with-token` is boolean, so a value after it
   // lands in positionals — where login ignored it, prompted anyway, and said nothing. The user's
@@ -66,8 +66,8 @@ async function login(ctx: Ctx): Promise<ExitCode> {
         "compromised: obtain a fresh one and clear the entry (`history -d`, or your shell's\n" +
         "equivalent).\n\n" +
         "Run the command WITHOUT the token and paste it at the prompt, or pipe it:\n" +
-        "  signum auth login --url " + url + "\n" +
-        '  printf %s "$TOKEN" | signum auth login --url ' + url + "\n",
+        "  " + loginCommand(url, ctx.args.flags.instance) + "\n" +
+        '  printf %s "$TOKEN" | ' + loginCommand(url, ctx.args.flags.instance) + "\n",
     });
   }
 
@@ -93,7 +93,7 @@ async function login(ctx: Ctx): Promise<ExitCode> {
     if (ctx.io.prompt === undefined) {
       // No way to ask and nothing piped. Refusing beats hanging (STORY-09).
       throw new UsageError("no token on stdin", {
-        hint: "The token is read from stdin so it never appears in shell history.\n\n" + HANDOFF_INSTRUCTIONS,
+        hint: "The token is read from stdin so it never appears in shell history.\n\n" + handoff,
       });
     }
     ctx.io.err(handoffPreamble(url));
@@ -106,7 +106,7 @@ async function login(ctx: Ctx): Promise<ExitCode> {
     token = (await ctx.io.readStdin()).trim();
   }
   if (token === "") {
-    throw new UsageError("empty token on stdin", { hint: HANDOFF_INSTRUCTIONS });
+    throw new UsageError("empty token on stdin", { hint: handoff });
   }
 
   // Validate before storing, so a bad paste fails now rather than mysteriously later.
@@ -121,6 +121,7 @@ async function login(ctx: Ctx): Promise<ExitCode> {
   let rotated: string | undefined;
   const http = new SignumHttp({
     baseUrl: url,
+    instance: ctx.args.flags.instance,
     token,
     timeoutMs: ctx.args.flags.timeoutMs,
     trace: ctx.args.flags.verbose ? (l) => ctx.io.err(l) : undefined,
@@ -152,7 +153,7 @@ async function login(ctx: Ctx): Promise<ExitCode> {
       throw new NotAuthenticatedError("the server rejected this token", {
         hint:
           "The token is wrong, truncated, expired against a changed password, or from a different\n" +
-          "application. Check you copied the whole value.\n\n" + HANDOFF_INSTRUCTIONS,
+          "application. Check you copied the whole value.\n\n" + handoff,
       });
     }
     throw err; // transport, timeout, anything else — report it as itself
@@ -164,7 +165,7 @@ async function login(ctx: Ctx): Promise<ExitCode> {
       hint:
         "This application configures an anonymous user, so Signum degraded the token instead of\n" +
         "rejecting it — which almost certainly means the token is wrong, truncated, or from a\n" +
-        "different application.\n\n" + HANDOFF_INSTRUCTIONS,
+        "different application.\n\n" + handoff,
     });
   }
 
@@ -239,7 +240,7 @@ async function status(ctx: Ctx): Promise<ExitCode> {
     } else {
       ctx.io.out("Not configured.\n");
       if (hasEnvToken) ctx.io.out("SIGNUM_TOKEN is set, but no target URL is — pass --url or set SIGNUM_URL.\n");
-      ctx.io.out("\n" + HANDOFF_INSTRUCTIONS + "\n");
+      ctx.io.out("\n" + handoffInstructions() + "\n");
     }
     return ExitCode.NotAuthenticated;
   }

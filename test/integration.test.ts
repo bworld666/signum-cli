@@ -134,10 +134,10 @@ const SUB_TOKENS: Record<string, unknown[]> = {
   // named --column and --order against parseTokens, so a token this list omits now fails the way a
   // genuinely invalid one does — which is exactly what caught this fixture being short of `Total`.
   "": [
-    { key: "Id", fullKey: "Id", niceName: "Id", type: { name: "number" }, isGroupable: true },
+    { key: "Id", fullKey: "Id", niceName: "Id", filterType: "Integer", type: { name: "number" }, isGroupable: true },
     { key: "Entity", fullKey: "Entity", niceName: "Order", type: { name: "Order" }, isGroupable: true },
     { key: "State", fullKey: "State", niceName: "State", type: { name: "string" }, isGroupable: true },
-    { key: "Total", fullKey: "Total", niceName: "Total", type: { name: "decimal" }, isGroupable: true },
+    { key: "Total", fullKey: "Total", niceName: "Total", filterType: "Decimal", type: { name: "decimal" }, isGroupable: true },
     { key: "Customer", fullKey: "Customer", niceName: "Customer", filterType: "Lite",
       type: { name: "Customer" }, isGroupable: true },
   ],
@@ -1396,6 +1396,21 @@ describe("query (STORY-20, STORY-21, STORY-22)", () => {
     expect(executeQueryRequests).toHaveLength(0);
   });
 
+  it("refuses a filter value its token's type cannot hold, before sending (REQ-052)", async () => {
+    // Found live: `Id > abc` reached the server, failed to convert there (FilterJsonConverter.cs:100)
+    // and came back as a 500, so the caller's typo was reported as a server fault with exit 1.
+    executeQueryRequests.length = 0;
+    const r = await cli(["query", "Order", "--filter", "Id > abc", "--json"]);
+    expect(r.code).toBe(ExitCode.Usage);
+    expect(r.err).toContain(`filter on 'Id' expects a whole number, got "abc"`);
+    const list = await cli(["query", "Order", "--filter", "Total in 1.5,lots", "--json"]);
+    expect(list.code).toBe(ExitCode.Usage);
+    expect(list.err).toContain("expects a number");
+    expect(executeQueryRequests).toHaveLength(0);
+    // A quoted number still converts, as the server reads numbers from strings (verified live).
+    expect((await cli(["query", "Order", "--filter", 'Id > "0"', "--json"])).code).toBe(ExitCode.Ok);
+  });
+
   it("--explain degrades on a missing credential for filter tokens too (#97)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "signum-nocred-"));
     const r = await cli(["query", "Order", "--filter", "State = 'Shipped'", "--explain"], {
@@ -2399,6 +2414,19 @@ describe("named instances (REQ-001)", () => {
     expect(r.code).toBe(ExitCode.Usage);
     expect(r.err).toContain("unknown instance 'locl'");
     expect(r.err).toContain("Did you mean 'local'?");
+    rmSync(d, { recursive: true, force: true });
+  });
+
+  it("names the instance, not its URL, in the login hint", async () => {
+    const d = mkdtempSync(join(tmpdir(), "signum-e2e-inst-")); // no credential.json: never logged in
+    const env = { SIGNUM_CONFIG_DIR: d };
+    await cli(["instance", "add", "local", baseUrl], { env });
+    const r = await cli(["get", "Order", "42", "-i", "local"], { env, tty: true });
+    expect(r.code).toBe(ExitCode.NotAuthenticated);
+    expect(r.err).toContain("signum -i local auth login");
+    expect(r.err).not.toContain("--url");
+    const login = await cli(["auth", "login", "-i", "local"], { env, tty: true });
+    expect(login.err).toContain("signum -i local auth login < token.txt");
     rmSync(d, { recursive: true, force: true });
   });
 
