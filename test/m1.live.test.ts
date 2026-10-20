@@ -192,8 +192,11 @@ describe.skipIf(!configured)("m1 against a live app (REQ-077)", () => {
     expect((await cli(["types", "--json"], { configDir: dir })).code).toBe(ExitCode.Ok);
     const [first] = await cacheEntries(dir);
     expect(typeof first?.lastModified).toBe("string");
-    await Bun.sleep(20);
-    expect((await cli(["types", "--json"], { configDir: dir })).code).toBe(ExitCode.Ok);
+    const again = await cli(["types", "--json"], { configDir: dir });
+    expect(again.code).toBe(ExitCode.Ok);
+    // A failed refresh also leaves fetchedAt alone (the stale cache is used, with a warning), so
+    // rule that out before reading an unchanged fetchedAt as the server's 304.
+    expect(again.err.includes("could not refresh")).toBe(false);
     // The document is rewritten only on a 200, so an unchanged fetchedAt means the server said 304.
     const [second] = await cacheEntries(dir);
     expect(second?.fetchedAt === first?.fetchedAt).toBe(true);
