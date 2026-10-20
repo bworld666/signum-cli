@@ -26,14 +26,15 @@ const configured = live !== undefined;
 
 // An isolated config dir: nothing from the developer's profile is read, and nothing is left behind.
 const configDir = mkdtempSync(join(tmpdir(), "signum-live-"));
-afterAll(() => rmSync(configDir, { recursive: true, force: true }));
+const extraDirs: string[] = [];
+afterAll(() => { for (const d of [configDir, ...extraDirs]) rmSync(d, { recursive: true, force: true }); });
 
 interface Result { code: ExitCode; out: string; err: string }
 
 /** Run one command as a human at a terminal (or as an agent), capturing output in memory only. */
-async function cli(argv: string[], opts: { agent?: boolean; anonymous?: boolean } = {}): Promise<Result> {
+async function cli(argv: string[], opts: { agent?: boolean; anonymous?: boolean; configDir?: string } = {}): Promise<Result> {
   let out = "", err = "";
-  const env: Record<string, string> = { SIGNUM_CONFIG_DIR: configDir, SIGNUM_URL: url as string };
+  const env: Record<string, string> = { SIGNUM_CONFIG_DIR: opts.configDir ?? configDir, SIGNUM_URL: url as string };
   if (opts.anonymous !== true) env["SIGNUM_TOKEN"] = token as string;
   if (opts.agent === true) env["CLAUDECODE"] = "1";
   const io: Io = {
@@ -174,6 +175,47 @@ describe.skipIf(!configured)("m1 against a live app (REQ-077)", () => {
     expect(r.code).toBe(ExitCode.NotFound);
     expect(r.err.includes("not found")).toBe(true);
     expect(/\b(404|500)\b/.test(r.err)).toBe(false);
+  });
+
+  // The cache checks each start from an empty config dir of their own, so what they see is theirs.
+  interface CacheEntry { scope: string; fetchedAt: string; lastModified: unknown; types: number }
+  const freshDir = (): string => {
+    const d = mkdtempSync(join(tmpdir(), "signum-live-cache-"));
+    extraDirs.push(d);
+    return d;
+  };
+  const cacheEntries = async (dir: string): Promise<CacheEntry[]> =>
+    json(await cli(["cache", "show", "--json"], { configDir: dir })) as CacheEntry[];
+
+  it("metadata cache (REQ-010): stored with Last-Modified, then revalidated with a 304", async () => {
+    const dir = freshDir();
+    expect((await cli(["types", "--json"], { configDir: dir })).code).toBe(ExitCode.Ok);
+    const [first] = await cacheEntries(dir);
+    expect(typeof first?.lastModified).toBe("string");
+    await Bun.sleep(20);
+    expect((await cli(["types", "--json"], { configDir: dir })).code).toBe(ExitCode.Ok);
+    // The document is rewritten only on a 200, so an unchanged fetchedAt means the server said 304.
+    const [second] = await cacheEntries(dir);
+    expect(second?.fetchedAt === first?.fetchedAt).toBe(true);
+  });
+
+  it("metadata cache (REQ-010, AC-24.4): a warm cache answers offline, identically; a cleared one cannot", async () => {
+    const dir = freshDir();
+    const online = await cli(["types", "--json"], { configDir: dir });
+    const offline = await cli(["types", "--offline", "--json"], { configDir: dir });
+    expect(offline.code).toBe(ExitCode.Ok);
+    expect(offline.out === online.out).toBe(true);
+    expect((await cli(["cache", "clear", "--url", url as string], { configDir: dir })).code).toBe(ExitCode.Ok);
+    expect((await cacheEntries(dir)).length).toBe(0);
+    expect((await cli(["types", "--offline"], { configDir: dir })).code).toBe(ExitCode.Transport);
+  });
+
+  it("metadata cache (AC-24.3): anonymous and authenticated documents are kept apart", async () => {
+    const dir = freshDir();
+    await cli(["types", "--json"], { configDir: dir, anonymous: true });
+    await cli(["types", "--json"], { configDir: dir });
+    const scopes = (await cacheEntries(dir)).map((e) => e.scope).sort();
+    expect(scopes).toEqual(["anon", "auth"]);
   });
 
   it("a bad token is exit 3 with the handoff steps, never a 401 (AC-08.1, AC-12.11)", async () => {
