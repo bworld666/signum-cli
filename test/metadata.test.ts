@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadMetadata } from "../src/core/metadata.ts";
+import { loadMetadata, parseMetadata, queryDenied } from "../src/core/metadata.ts";
 import { SignumHttp } from "../src/core/http.ts";
 import { CliError } from "../src/core/errors.ts";
 
@@ -180,5 +180,23 @@ describe("the metadata cache is scoped to the caller's auth state", () => {
     } finally {
       server?.stop(true);
     }
+  });
+});
+
+describe("queryAllowed (AuthServer.cs:161-176)", () => {
+  const origin = { url: "https://app.example", fetchedAt: "", fromCache: false, stale: false, authenticated: true };
+  const parse = (t: Record<string, unknown>) => parseMetadata({ T: { kind: "Entity", entityKind: "Main", ...t } }, origin).types.get("t");
+
+  it("keeps the three values the framework defines and drops anything else", () => {
+    expect(parse({ queryAllowed: "None" })?.queryAllowed).toBe("None");
+    expect(parse({ queryAllowed: "EmbeddedOnly", queryDefined: true })?.queryAllowed).toBe("EmbeddedOnly");
+    expect(parse({ queryAllowed: "none" })?.queryAllowed).toBeUndefined();
+    expect(parse({ queryAllowed: 0 })?.queryAllowed).toBeUndefined();
+  });
+
+  it("a query is denied only when queryDefined is cleared AND queryAllowed says None", () => {
+    expect(queryDenied(parse({ queryAllowed: "None" })!)).toBe(true);
+    expect(queryDenied(parse({ queryAllowed: "EmbeddedOnly", queryDefined: true })!)).toBe(false);
+    expect(queryDenied(parse({})!)).toBe(false);
   });
 });

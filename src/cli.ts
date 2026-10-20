@@ -110,6 +110,17 @@ function showHelp(args: ParsedArgs, io: Io): ExitCode {
 
 export async function run(argv: readonly string[], io: Io): Promise<ExitCode> {
   const args = parseArgs(argv, io.env);
+  try {
+    return await runParsed(args, io);
+  } catch (err) {
+    // The one place that knows how the user named the target, so a login hint raised anywhere
+    // below is worded for it here (`-i <name>` when an instance was given).
+    if (err instanceof CliError) err.namingInstance(args.flags.instance);
+    throw err;
+  }
+}
+
+async function runParsed(args: ParsedArgs, io: Io): Promise<ExitCode> {
   const format = effectiveFormat(args.flags.output, io.stdoutIsTty);
 
   const caller = detectCallerContext({

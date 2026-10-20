@@ -422,7 +422,7 @@ export async function runQuery(ctx: Ctx): Promise<ExitCode> {
     url: target.url, http: target.http, offline: ctx.args.flags.offline,
     env: ctx.io.env, warn: (l) => ctx.io.err(l),
   });
-  resolveQueryKey(md, queryKey, ctx.args.flags.instance);
+  resolveQueryKey(md, queryKey);
 
   // Needed before column resolution: a count transfers no rows, so it needs no columns.
   const wantCount = flag(ctx, "count");

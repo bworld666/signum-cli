@@ -9,12 +9,12 @@
  */
 
 import type { Ctx } from "../core/ctx.ts";
-import { ExitCode, NotAuthenticatedError, NotFoundError, UsageError } from "../core/errors.ts";
+import { ExitCode, UsageError } from "../core/errors.ts";
 import { listingShape, renderDocument, renderListing } from "../core/output.ts";
 import { isBuiltIn } from "../core/args.ts";
 import {
-  anonymousViewNote, findType, hidesEntities, isEntityTypeInfo, loadMetadata, needsLogin, queryableTypes, suggestTypes, TYPE_KINDS,
-  type Metadata, type OperationInfo, type TypeInfo,
+  anonymousViewNote, findType, hidesEntities, isEntityTypeInfo, loadMetadata, queryableTypes, queryDenied, TYPE_KINDS,
+  unknownTypeError, type Metadata, type OperationInfo, type TypeInfo,
 } from "../core/metadata.ts";
 import { loginCommand } from "../core/handoff.ts";
 import { flag, opt } from "../core/ctx.ts";
@@ -138,7 +138,7 @@ function listOperations(ctx: Ctx, md: Metadata, typeName: string | undefined): E
   let types: TypeInfo[];
   if (typeName !== undefined) {
     const t = findType(md, typeName);
-    if (t === undefined) throw unknownType(ctx, md, typeName);
+    if (t === undefined) throw unknownTypeError(md, typeName);
     types = [t];
   } else {
     types = [...md.types.values()].filter((t) => t.operations.length > 0);
@@ -179,17 +179,6 @@ function listOperations(ctx: Ctx, md: Metadata, typeName: string | undefined): E
 
 function kebab(s: string): string {
   return s.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
-}
-
-function unknownType(ctx: Ctx, md: Metadata, name: string): NotFoundError | NotAuthenticatedError {
-  const hidden = needsLogin(md, `type '${name}'`, ctx.args.flags.instance);
-  if (hidden !== undefined) return hidden;
-  const near = suggestTypes(md, name);
-  return new NotFoundError(`unknown type '${name}'`, {
-    hint: near.length > 0
-      ? `Did you mean: ${near.join(", ")}?\nRun \`signum types\` for the full list.`
-      : "Run `signum types` to see what this application exposes.",
-  });
 }
 
 /**
@@ -384,7 +373,7 @@ async function explainType(ctx: Ctx, root: TypeInfo): Promise<ExitCode> {
       "\nNext: signum explain " + root.name + ".<token>   ·   signum query " + root.name +
       (sampleToken !== undefined ? ` --column ${sampleToken}` : "") + "\n",
     );
-  } else if (root.queryAllowed === "None") {
+  } else if (queryDenied(root)) {
     ctx.io.out(`\nYour role may not run this type's query (queryAllowed: None), so \`signum query ${root.name}\` exits 4.\n`);
   } else {
     ctx.io.out(
@@ -434,7 +423,7 @@ async function explain(ctx: Ctx, md: Metadata, subject: string | undefined): Pro
   // Otherwise a type, optionally followed by a token path.
   const segments = subject.split(".");
   const root = findType(md, segments[0] as string);
-  if (root === undefined) throw unknownType(ctx, md, segments[0] as string);
+  if (root === undefined) throw unknownTypeError(md, segments[0] as string);
 
   if (segments.length === 1 && flag(ctx, "privacy")) return explainPrivacy(ctx, md, root);
   if (segments.length === 1) return await explainType(ctx, root);

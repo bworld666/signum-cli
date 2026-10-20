@@ -25,8 +25,7 @@
 
 import { SignumHttp } from "./http.ts";
 import { loadMetadataCache, saveMetadataCache } from "./metadata-cache.ts";
-import { CliError, ExitCode, NotAuthenticatedError, NotAuthorizedError, UsageError } from "./errors.ts";
-import { loginCommand } from "./handoff.ts";
+import { CliError, ExitCode, NotAuthenticatedError, NotAuthorizedError, NotFoundError, UsageError } from "./errors.ts";
 import { editDistance } from "./text.ts";
 
 export interface MemberInfo {
@@ -56,13 +55,21 @@ export interface TypeInfo {
   members: MemberInfo[];
   operations: OperationInfo[];
   hasQuery: boolean;
-  /**
-   * May the caller's role run this type's query: `Allow`, `EmbeddedOnly` or `None`, from
-   * Signum.Authorization (AuthServer.cs:161-176). `None` also clears `queryDefined`, so it is what
-   * tells "you may not" from "there is none". The API runs `EmbeddedOnly` queries
-   * (DynamicQueryContainer.cs:29, `fullScreen: false`). Absent without the module.
-   */
-  queryAllowed: string | undefined;
+  /** Absent without Signum.Authorization, and for a value it does not define. See `queryDenied`. */
+  queryAllowed: QueryAllowed | undefined;
+}
+
+/**
+ * May the caller's role run a type's query, as Signum.Authorization reports it (AuthServer.cs:161-176).
+ * `None` also clears `queryDefined`, which is what tells "you may not" from "there is none". The API
+ * runs `EmbeddedOnly` queries (DynamicQueryContainer.cs:29, `fullScreen: false`).
+ */
+export type QueryAllowed = "Allow" | "EmbeddedOnly" | "None";
+const QUERY_ALLOWED: ReadonlySet<string> = new Set<QueryAllowed>(["Allow", "EmbeddedOnly", "None"]);
+
+/** The caller's role may not run this type's query: the server cleared `queryDefined` and said why. */
+export function queryDenied(t: TypeInfo): boolean {
+  return !t.hasQuery && t.queryAllowed === "None";
 }
 
 export interface Metadata {
@@ -117,7 +124,7 @@ export function parseMetadata(payload: unknown, origin: Metadata["origin"]): Met
         members: parseMembers(t["members"]),
         operations: parseOperations(t["operations"]),
         hasQuery: t["queryDefined"] === true || t["hasQuery"] === true,
-        queryAllowed: str(t["queryAllowed"]),
+        queryAllowed: QUERY_ALLOWED.has(String(t["queryAllowed"])) ? t["queryAllowed"] as QueryAllowed : undefined,
       });
     }
   }
@@ -176,10 +183,10 @@ export function queryableTypes(md: Metadata): TypeInfo[] {
  * @throws NotAuthorizedError when the caller's role may not run the query (REQ-051: exit 4).
  * @throws UsageError when the type is unknown, or known but defines no query.
  */
-export function resolveQueryKey(md: Metadata, key: string, instance?: string): TypeInfo {
+export function resolveQueryKey(md: Metadata, key: string): TypeInfo {
   const type = findType(md, key);
   if (type === undefined) {
-    const hidden = needsLogin(md, `query key '${key}'`, instance);
+    const hidden = needsLogin(md, `query key '${key}'`);
     if (hidden !== undefined) throw hidden;
     const near = suggestTypes(md, key);
     throw new UsageError(`unknown query key '${key}'`, {
@@ -188,12 +195,13 @@ export function resolveQueryKey(md: Metadata, key: string, instance?: string): T
         : "Run `signum queries` to see available queries.",
     });
   }
-  if (!type.hasQuery && type.queryAllowed === "None") {
+  if (queryDenied(type)) {
     // Refused here rather than sent: the server would answer 403 + UnauthorizedAccessException
-    // (DynamicQueryContainer.cs:205-209), which is exit 4 too.
+    // (DynamicQueryContainer.cs:205-209), which is exit 4 too. Anonymously it means "log in": an app
+    // with QueryAuthLogic but not TypeAuthLogic lists its entities to anyone, and denies every query.
     if (!md.origin.authenticated) {
       throw new NotAuthenticatedError(`query '${type.name}' needs a login`, {
-        hint: `Log in and retry: ${loginCommand(md.origin.url, instance)}`,
+        loginHint: { url: md.origin.url, render: (login) => `Log in and retry: ${login}` },
       });
     }
     throw new NotAuthorizedError(`your role may not run query '${type.name}'`, {
@@ -222,10 +230,25 @@ export function resolveQueryKey(md: Metadata, key: string, instance?: string): T
  * Logging in is what helps, which is what exit 3 means. Seen live: a handful of types and no
  * entity anonymously, hundreds logged in.
  */
-export function needsLogin(md: Metadata, subject: string, instance?: string): NotAuthenticatedError | undefined {
+export function needsLogin(md: Metadata, subject: string): NotAuthenticatedError | undefined {
   if (!hidesEntities(md)) return undefined;
   return new NotAuthenticatedError(`${subject} is not visible without a login`, {
-    hint: `${anonymousViewNote(md)}\nLog in and retry: ${loginCommand(md.origin.url, instance)}`,
+    loginHint: { url: md.origin.url, render: (login) => `${anonymousViewNote(md)}\nLog in and retry: ${login}` },
+  });
+}
+
+/**
+ * The error for a type name `md` does not know — the one answer every lookup gives: "log in" when an
+ * anonymous view hides it (exit 3), else "unknown type" with the nearest names (exit 5, AC-63.4).
+ */
+export function unknownTypeError(md: Metadata, name: string): NotAuthenticatedError | NotFoundError {
+  const hidden = needsLogin(md, `type '${name}'`);
+  if (hidden !== undefined) return hidden;
+  const near = suggestTypes(md, name);
+  return new NotFoundError(`unknown type '${name}'`, {
+    hint: near.length > 0
+      ? `Did you mean: ${near.join(", ")}?\nRun \`signum types\` for the full list.`
+      : "Run `signum types` to see what this application exposes.",
   });
 }
 
