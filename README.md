@@ -36,11 +36,13 @@ signum help                                          # commands, topics, exit co
 | `get` | Retrieve one entity by type and id, or by Lite key |
 | `unmask` | Resolve local `ref_` pseudonym handles back to the records they stand for |
 | `cache` | Inspect or clear cached application metadata |
+| `instance` | Register short names for target URLs, then use `-i <name>` instead of `--url` |
 | `version` | CLI version, and the target's when reachable |
 
-Configuration is flags and environment variables only — `SIGNUM_URL`, `SIGNUM_TOKEN`,
+Configuration is flags and environment variables — `SIGNUM_URL`, `SIGNUM_INSTANCE`, `SIGNUM_TOKEN`,
 `SIGNUM_OFFLINE`, `SIGNUM_CONFIG_DIR`, `SIGNUM_CALLER_CONTEXT`, `SIGNUM_PSEUDONYMIZE`,
-`SIGNUM_ALLOW_AGENT_DATA`. Output is a table on a terminal and JSON when piped; override with `-o`.
+`SIGNUM_ALLOW_AGENT_DATA` — plus named instances (`signum instance add https://app.example.org/home`,
+then `signum -i app types`), stored in the config directory. Output is a table on a terminal and JSON when piped; override with `-o`.
 
 **Under an AI agent.** The CLI detects agent callers (e.g. `CLAUDECODE`, `AI_AGENT`) and then
 refuses to print row data unless pseudonymization is on or the data is explicitly acknowledged

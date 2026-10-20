@@ -132,7 +132,7 @@ signum ship order --help          # same, reached the way you would expect
 |---|---|---|
 | `signum auth login` · `logout` · `status` | **m1** | Credentials. `status` is the first thing to run when something breaks. |
 | `signum auth token` | m2 | Print the stored token (guarded; see §7). |
-| `signum config get-contexts` · `use-context` · `set-context` · `current-context` | m2 | Target selection. |
+| `signum instance add` · `list` · `remove` · `path` | **m2, implemented** | Target selection by name: `instance add <url> [name]` registers a URL (name defaults to its first host label), `-i <name>` targets it. Replaces the planned `config get-contexts`/`use-context`/`set-context`/`current-context`; there is no current-instance state yet (see §3). |
 | `signum mcp` | m3 | Serve the command set over MCP on stdio. |
 | `signum unmask <ref…>` | m2 | Human-only resolution of `ref_` handles (AC-53.4). Refused under an agent context. |
 | `signum auth key create` · `show` | m3 | API-key provisioning. Not applicable to the target app — no `Signum.Rest` ([target profile](../target-application.md)). |
@@ -214,8 +214,8 @@ them to reimplement knowledge that already exists. One structured source, many r
 
 | Flag | Milestone | Notes |
 |---|---|---|
-| `--context <name>` | m2 | Which target app. kubectl naming. |
-| `--url <url>` | **m1** | Target directly, bypassing contexts. m1 has no context store yet. |
+| `-i, --instance <name>` | **m2, implemented** | Which target app, by registered name (or `SIGNUM_INSTANCE`). Resolved to a URL locally; the stored credential is still matched by URL. Conflicts with `--url`. Replaces the planned `--context` — the user-facing name is *instance*, a short `-i` was wanted, and the store holds a URL only, not the URL + credential + cache bundle `context` promised. |
+| `--url <url>` | **m1** | Target directly, bypassing instances. Order: `--url` / `-i` → `SIGNUM_INSTANCE` → `SIGNUM_URL` → the stored credential's URL. |
 | `-o, --output <fmt>` | **m1** | `table`, `json`, `csv`, `tsv`, `ndjson`, `name`. |
 | `--json` | **m1** | Alias for `-o json`, for `gh` muscle memory. |
 | `--explain` | **m1** | Print the request that *would* be sent instead of sending it. Read-only metadata lookups (type and query descriptions) still go out, from the cache when possible; `--offline` forbids them. |
@@ -342,7 +342,7 @@ signum mcp                                                    # m3: serve over s
 | `signum <verb> <Type>` — `signum create order` | `run <Key>`, `operation execute`, `exec`, `op`, bare `<OperationKey>` | Operations are the app's named business actions and the only mutation path; a generic verb makes the most important concept the least visible. Verb-noun keeps the whole data surface one grammar and reads like `kubectl delete pod`. The dotted key remains as the canonical unambiguous form. |
 | `signum query` | `get` for both | Queries and entity retrieval are different endpoints with different shapes; one verb would blur `queryKey` and `Type`. |
 | `signum explain` | `describe` | kubectl's `describe` dumps an *instance*; `explain` walks a *schema*. We mean the schema. `describe` stays free for a future instance-detail view. |
-| `context` | `profile` | It bundles URL + credential + metadata cache, matching kubectl's meaning precisely. |
+| `instance` | `context`, `profile` | Originally `context` (kubectl). Changed when built: the store maps a name to a URL only, so `context`'s promise of a URL + credential + cache bundle would overstate it, and `-i` was wanted as the short form. |
 | `--filter` | `--selector`/`-l` | kubectl selectors are label equality; ours is a full expression language ([filter syntax](filter-expression-syntax.md)). Reusing `-l` would promise the wrong semantics. |
 
 ## 9. m1 surface, complete

@@ -78,7 +78,7 @@ describe("loadCredential surfaces the check without depending on it", () => {
       { url: "https://a.example", token: "t", source: "browser-handoff", savedAt: "now" },
       env(),
     );
-    const loaded = loadCredential(env());
+    const loaded = loadCredential(undefined, env());
     expect(loaded?.credential.url).toBe("https://a.example");
     expect(loaded?.permissionWarning).toBeUndefined();
   });
@@ -89,7 +89,7 @@ describe("loadCredential surfaces the check without depending on it", () => {
       env(),
     );
     chmodSync(p, 0o666);
-    const loaded = loadCredential(env());
+    const loaded = loadCredential(undefined, env());
     // AC-11.5: wrong permissions are a warning, not a refusal to work.
     expect(loaded?.credential.token).toBe("t");
     if (!permissionsAreUnenforceable()) expect(loaded?.permissionWarning).toContain("expected 600");

@@ -67,6 +67,8 @@ export interface EchoInput {
   booleans: ReadonlySet<string>;
   /** True when --url was NOT given explicitly, so it came from the environment or a credential. */
   urlWasImplicit: boolean;
+  /** The instance name, when one was typed — echoed instead of the URL it resolved to. */
+  instance?: string | undefined;
 }
 
 export interface Echo {
@@ -97,7 +99,8 @@ export function echoCommand(input: EchoInput): Echo {
 
   for (const p of input.positionals) push(p);
 
-  if (input.url !== undefined && !input.urlWasImplicit) { parts.push("--url"); push(input.url); }
+  if (input.instance !== undefined) { parts.push("-i"); push(input.instance); }
+  else if (input.url !== undefined && !input.urlWasImplicit) { parts.push("--url"); push(input.url); }
 
   // Repeatable options in the order given, so a multi-filter query reads as the caller wrote it.
   for (const [name, values] of input.options) {
@@ -134,6 +137,8 @@ export function emitCommandEcho(ctx: Ctx): void {
     positionals: ctx.args.positionals,
     url: ctx.args.flags.url,
     urlWasImplicit: !ctx.args.rawFlagNames.has("url"),
+    // Typed only: one from SIGNUM_INSTANCE is already in the human's environment, like SIGNUM_URL.
+    instance: ctx.args.rawFlagNames.has("instance") || ctx.args.rawFlagNames.has("i") ? ctx.args.flags.instance : undefined,
     output: ctx.args.flags.output,
     offline: ctx.args.flags.offline,
     timeoutMs: ctx.args.flags.timeoutMs,

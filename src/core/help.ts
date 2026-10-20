@@ -33,6 +33,7 @@ export interface CommandSpec {
 
 export const GLOBAL_FLAGS: FlagSpec[] = [
   { name: "url", arg: "<url>", summary: "Target application base URL (or SIGNUM_URL)" },
+  { name: "instance", alias: "i", arg: "<name>", summary: "Target a registered instance (or SIGNUM_INSTANCE); see `signum instance`" },
   { name: "output", alias: "o", arg: "<fmt>", summary: `Output format: ${OUTPUT_FORMATS.join(", ")}` },
   { name: "json", summary: "Alias for --output json" },
   { name: "explain", summary: "Print the request instead of sending it (metadata may be fetched)" },
@@ -108,14 +109,17 @@ export const COMMANDS: CommandSpec[] = [
         // Implemented in runAuth since m1 but never declared here, so it was absent from
         // SUBCOMMANDS, had no `--help`, and `signum help auth logout` fell back to the topic.
         name: "logout",
-        summary: "Remove the stored credential from this machine",
-        usage: "signum auth logout",
+        summary: "Remove a stored credential from this machine",
+        usage: "signum auth logout [--url <url> | -i <name> | --all]",
         milestone: "m1",
         description:
+          "Credentials are stored per target. Without --url or -i this removes the default " +
+          "target's (the most recent login); --all removes every one.\n\n" +
           "Local only. Signum does not revoke issued tokens: api/auth/logout clears a cookie " +
           "and performs no revocation, so the token stays valid server-side until the user's " +
           "password hash or state changes.",
-        examples: ["signum auth logout"],
+        flags: [{ name: "all", summary: "Remove the stored credential for every target" }],
+        examples: ["signum auth logout", "signum auth logout --url https://app.example", "signum auth logout --all"],
       },
     ],
   },
@@ -300,6 +304,53 @@ export const COMMANDS: CommandSpec[] = [
         usage: "signum cache path",
         milestone: "m1",
         examples: ["signum cache path", 'ls "$(signum cache path)"'],
+      },
+    ],
+  },
+  {
+    name: "instance",
+    summary: "Register short names for target applications, used as -i <name>",
+    usage: "signum instance <add|list|remove|path>",
+    milestone: "m2",
+    description:
+      "A registered name stands in for --url anywhere: `signum -i renew types`. The name defaults " +
+      "to the URL's first host label (https://renew.example.org/home → renew).\n\n" +
+      "Names are stored in instances.json in the config directory, owner-only. A stored login " +
+      "is still matched by URL, so -i reaches it exactly when --url with the same address would. " +
+      "Nothing here touches the network.",
+    examples: [
+      "signum instance add https://renew.example.org/home",
+      "signum instance add https://app.example.org staging",
+      "signum instance list",
+    ],
+    subcommands: [
+      {
+        name: "add",
+        summary: "Register a URL under a name (default: its first host label)",
+        usage: "signum instance add <url> [name]",
+        milestone: "m2",
+        examples: ["signum instance add https://renew.example.org/home", "signum instance add http://localhost:5000 local"],
+      },
+      {
+        name: "list",
+        summary: "List registered instances",
+        usage: "signum instance list",
+        milestone: "m2",
+        examples: ["signum instance list", "signum instance list --json"],
+      },
+      {
+        name: "remove",
+        summary: "Forget a name; the stored login, if any, is kept",
+        usage: "signum instance remove <name>",
+        milestone: "m2",
+        examples: ["signum instance remove renew"],
+      },
+      {
+        name: "path",
+        summary: "Print the instances file path, bare, for scripting",
+        usage: "signum instance path",
+        milestone: "m2",
+        examples: ["signum instance path"],
       },
     ],
   },

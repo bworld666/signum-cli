@@ -9,7 +9,10 @@
 import type { Ctx } from "../core/ctx.ts";
 import { ExitCode, NotAuthenticatedError, TransportError, UsageError } from "../core/errors.ts";
 import { renderDocument } from "../core/output.ts";
-import { deleteCredential, loadCredential, permissionsAreUnenforceable, saveCredential } from "../core/credentials.ts";
+import {
+  defaultCredentialUrl, deleteAllCredentials, deleteCredential, loadCredential, permissionsAreUnenforceable, saveCredential,
+  storedCredentialUrls,
+} from "../core/credentials.ts";
 import { SignumHttp } from "../core/http.ts";
 import { flag } from "../core/ctx.ts";
 import { resolveTarget } from "../core/target.ts";
@@ -215,10 +218,10 @@ function userName(user: unknown): string | undefined {
 }
 
 async function status(ctx: Ctx): Promise<ExitCode> {
-  const stored = loadCredential(ctx.io.env);
+  const url = ctx.args.flags.url ?? defaultCredentialUrl(ctx.io.env);
+  const stored = url !== undefined ? loadCredential(url, ctx.io.env) : undefined;
   const envToken = ctx.io.env["SIGNUM_TOKEN"];
   const hasEnvToken = envToken !== undefined && envToken !== "";
-  const url = ctx.args.flags.url ?? stored?.credential.url;
 
   const report = {
     target: url ?? null,
@@ -324,9 +327,19 @@ async function status(ctx: Ctx): Promise<ExitCode> {
 }
 
 function logout(ctx: Ctx): ExitCode {
-  const removed = deleteCredential(ctx.io.env);
-  ctx.io.out(removed ? "Credential removed.\n" : "No stored credential.\n");
-  if (removed) {
+  let removed: string[];
+  if (flag(ctx, "all")) {
+    removed = deleteAllCredentials(ctx.io.env);
+  } else {
+    // The named target, else the default one — the credential a bare command would have used.
+    const url = ctx.args.flags.url ?? defaultCredentialUrl(ctx.io.env);
+    removed = url !== undefined && deleteCredential(url, ctx.io.env) ? [url] : [];
+  }
+  if (removed.length === 0) ctx.io.out("No stored credential.\n");
+  for (const url of removed) ctx.io.out(`Credential removed for ${url}.\n`);
+  const remaining = storedCredentialUrls(ctx.io.env);
+  if (remaining.length > 0) ctx.io.err(`Still stored: ${remaining.join(", ")}. Use --all to remove every one.\n`);
+  if (removed.length > 0) {
     // Be honest: api/auth/logout clears a cookie and performs no token revocation (AC-07.2).
     ctx.io.err(
       "Note: this is local only. Signum does not revoke issued tokens, so the token remains\n" +

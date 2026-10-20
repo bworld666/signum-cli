@@ -20,6 +20,8 @@ import { runDiscover } from "./commands/discover.ts";
 import { runQuery } from "./commands/query.ts";
 import { runGet } from "./commands/get.ts";
 import { runCache } from "./commands/cache.ts";
+import { runInstance } from "./commands/instance.ts";
+import { resolveInstance } from "./core/instances.ts";
 import { runUnmask } from "./commands/unmask.ts";
 import type { Ctx, Io } from "./core/ctx.ts";
 
@@ -129,6 +131,9 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitCode> {
   // Before any request is made, so a refused trace never prints a line (#128).
   if (args.flags.verbose) assertMayTrace(caller, args.flags.allowAgentData);
 
+  // After help, which must not read configuration (AC-60.2); before any command reads `url`.
+  if (args.flags.instance !== undefined) args.flags.url = resolveInstance(args.flags.instance, io.env);
+
   const privacy = resolvePolicy({
     callerIsAgent: caller.context === "agent",
     requested: args.flags.pseudonymize !== undefined ? parseMode(args.flags.pseudonymize) : undefined,
@@ -219,6 +224,7 @@ export const HANDLERS: Readonly<Record<string, Handler>> = {
   get: (ctx) => runGet(ctx),
   unmask: (ctx) => runUnmask(ctx),
   cache: (ctx) => runCache(ctx),
+  instance: (ctx) => runInstance(ctx),
 };
 
 /**
