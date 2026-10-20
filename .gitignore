@@ -26,3 +26,4 @@ dist/
 
 # Build output
 dist/
+.brooks-lint-history.json
