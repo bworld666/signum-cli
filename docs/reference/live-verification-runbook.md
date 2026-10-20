@@ -71,12 +71,19 @@ Obtain a token (human does this, once):
 type names and counts — so a failure cannot print data. The human runs it, in their own shell:
 
 ```bash
-SIGNUM_LIVE_URL="$SIGNUM_URL" SIGNUM_LIVE_TOKEN="$SIGNUM_TOKEN" SIGNUM_LIVE_ENTITY="<Type>;<id>" \
+# a registered instance with a stored login (`signum instance add`, `signum -i <name> auth login`)
+SIGNUM_LIVE_INSTANCE=<name> ./node_modules/.bin/bun test test/m1.live.test.ts test/entity.live.test.ts
+
+# or a URL and a token from the environment
+SIGNUM_LIVE_URL="$SIGNUM_URL" SIGNUM_LIVE_TOKEN="$SIGNUM_TOKEN" \
   ./node_modules/.bin/bun test test/m1.live.test.ts test/entity.live.test.ts
 ```
 
-Pick the entity from the least personal type available. `SIGNUM_LIVE_QUERY` overrides the query key
-(default: the entity's type). Report pass/fail per test name. A pass covers phases 1–5 below in
+The stored token is read in memory and never printed. `SIGNUM_LIVE_ENTITY="<Type>;<id>"` names the
+entity to read; without it the suite takes the first `Role` — the least personal type every
+authorized app has — and its id never leaves memory. `SIGNUM_LIVE_QUERY` overrides the query key
+(default: the entity's type). Naming a target that cannot be used (an unknown instance, no stored
+login, an empty token) fails the run instead of skipping it. All variables: `test/live-config.ts`. Report pass/fail per test name. A pass covers phases 1–5 below in
 outline; the manual phases remain for the structural detail (key paths, interning) the suite does not
 record.
 

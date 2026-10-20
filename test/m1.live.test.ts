@@ -6,13 +6,9 @@
  * boolean, a type name or a count, so a failure cannot print a row, a name or an id into a log
  * (runbook rule 2). Read only — nothing here sends a write.
  *
- * Skipped unless these are set (the token comes from the environment, never from a file):
- *   SIGNUM_LIVE_URL     base URL of the app
- *   SIGNUM_LIVE_TOKEN   a bearer token for it
- *   SIGNUM_LIVE_ENTITY  a Lite key that exists, e.g. "Role;1" — prefer the least personal type
- *   SIGNUM_LIVE_QUERY   optional query key; defaults to the entity's type
+ * Skipped unless a live target is named — see test/live-config.ts for the variables:
  *
- *   SIGNUM_LIVE_URL=… SIGNUM_LIVE_TOKEN=… SIGNUM_LIVE_ENTITY=… ./node_modules/.bin/bun test test/m1.live.test.ts
+ *   SIGNUM_LIVE_INSTANCE=renew ./node_modules/.bin/bun test test/m1.live.test.ts
  */
 
 import { afterAll, describe, expect, it } from "bun:test";
@@ -23,13 +19,10 @@ import { run } from "../src/cli.ts";
 import type { Io } from "../src/core/ctx.ts";
 import { ExitCode } from "../src/core/errors.ts";
 import { HANDLE_PREFIX } from "../src/core/privacy.ts";
-import { parseLiteKey } from "../src/core/text.ts";
+import { live } from "./live-config.ts";
 
-const url = process.env["SIGNUM_LIVE_URL"];
-const token = process.env["SIGNUM_LIVE_TOKEN"];
-const lite = parseLiteKey(process.env["SIGNUM_LIVE_ENTITY"] ?? "");
-const queryKey = process.env["SIGNUM_LIVE_QUERY"] || lite?.type;
-const configured = url !== undefined && url !== "" && token !== undefined && token !== "" && lite !== undefined;
+const { url, token, lite, queryKey } = live ?? {};
+const configured = live !== undefined;
 
 // An isolated config dir: nothing from the developer's profile is read, and nothing is left behind.
 const configDir = mkdtempSync(join(tmpdir(), "signum-live-"));
@@ -87,12 +80,14 @@ describe.skipIf(!configured)("m1 against a live app (REQ-077)", () => {
     expect((res.out + res.err).includes(token as string)).toBe(false);
   });
 
-  it("types (REQ-011): kind is KindOfType, entityKind is separate, the entity's type is listed", async () => {
+  it("types (REQ-011): kind is KindOfType, entityKind is separate, the entity's type is listed with one", async () => {
     const types = json(await cli(["types", "--json"])) as Array<{ name: string; kind: unknown; entityKind: unknown }>;
     expect(types.length > 0).toBe(true);
     expect(types.every((t) => KINDS.has(String(t.kind)))).toBe(true);
-    expect(types.filter((t) => t.kind === "Entity").every((t) => typeof t.entityKind === "string")).toBe(true);
-    expect(types.some((t) => t.name.replace(/Entity$/, "") === lite!.type.replace(/Entity$/, ""))).toBe(true);
+    // Only an IEntity has an entity kind; model and embedded types are kind Entity without one.
+    expect(types.filter((t) => t.entityKind !== null).every((t) => t.kind === "Entity" && typeof t.entityKind === "string")).toBe(true);
+    const own = types.find((t) => t.name.replace(/Entity$/, "") === lite!.type.replace(/Entity$/, ""));
+    expect(typeof own?.entityKind).toBe("string");
   });
 
   it("types anonymously: discovery needs no credential (AC-61.4)", async () => {
