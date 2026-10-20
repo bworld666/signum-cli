@@ -18,6 +18,7 @@ import {
 } from "./errors.ts";
 import { rotateCredential } from "./credentials.ts";
 import { parseLossless } from "./json.ts";
+import { handoffInstructions } from "./handoff.ts";
 
 export const REDACTED = "<redacted>";
 
@@ -118,6 +119,21 @@ function fieldErrors(body: unknown): string[] {
     for (const m of messages) if (typeof m === "string") lines.push(`  ${key === "" ? "(entity)" : key}: ${m}`);
   }
   return lines;
+}
+
+/**
+ * The application's version, from the headers every MVC action response carries (REQ-007).
+ *
+ * `VersionFilterAttribute` is a default filter (`SignumServer.cs:70`) and sets `X-App-Version` to the
+ * entry assembly's version and `X-App-BuildTime` to its build time (`VersionFilterAttribute.cs:20-26`).
+ * Absent on a response that started before the filter ran, so both are optional.
+ */
+export function appVersionFrom(headers: Headers): { version: string | undefined; buildTime: string | undefined } {
+  const pick = (name: string) => {
+    const v = headers.get(name);
+    return v !== null && v !== "" ? v : undefined;
+  };
+  return { version: pick("X-App-Version"), buildTime: pick("X-App-BuildTime") };
 }
 
 export class SignumHttp {
@@ -234,8 +250,13 @@ export class SignumHttp {
     if (status === 403) {
       // 403 covers BOTH cases; exceptionType is the only discriminator (AC-08.2).
       if (type.includes("AuthenticationException")) {
+        // AC-12.11: a token that stopped working needs a fresh browser handoff, and saying only
+        // "re-run login" leaves the user to rediscover how to obtain one.
         return new NotAuthenticatedError(`not authenticated: ${message}`, {
-          hint: "Your token may be invalid or superseded. Re-run `signum auth login --with-token`.",
+          hint:
+            "The token is no longer accepted, so a fresh browser handoff is required.\n" +
+            "(If it came from SIGNUM_TOKEN, replace the variable's value instead.)\n\n" +
+            handoffInstructions(this.opts.baseUrl),
         });
       }
       if (type.includes("UnauthorizedAccessException")) {
