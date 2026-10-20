@@ -4,9 +4,9 @@ A command-line client for [Signum Framework](https://github.com/signumsoftware/f
 applications — run dynamic queries, retrieve and save entities, and execute operations
 against a running Signum app.
 
-> **Status: pre-release, milestone `m1` (read-only core).** The CLI is implemented and published
-> as pre-release binaries (`v0.1.0-b.*`). It can discover, query and read; it cannot write yet —
-> saving entities and executing operations are milestone `m2`. Requirements live in
+> **Status: `v0.2.0`, milestone `m1` (read-only core).** The first full release, after the
+> pre-releases `v0.1.0-b.*`; see [`CHANGELOG.md`](CHANGELOG.md). It can discover, query and read;
+> it cannot write yet — saving entities and executing operations are milestone `m2`. Requirements live in
 > [`docs/requirements.md`](docs/requirements.md) and the issues labelled
 > [`requirement`](https://github.com/pajoma/signum-cli/labels/requirement).
 
@@ -148,12 +148,12 @@ To cut a release: bump `version` in `package.json`, commit, then tag `v<that-ver
 the tag. The pipeline refuses a tag that doesn't match `package.json`, a PEP 440 tag
 (`0.1.0b1`), or a channel mismatch (a pre-release tag on `main`, or vice versa).
 
-**Installing a pre-release:** download the binary for your platform from the
+**Installing:** download the binary for your platform from the
 [releases page](https://github.com/pajoma/signum-cli/releases), check it against `SHA256SUMS`, then:
 
 ```
 chmod +x signum-<version>-linux-x64
-./signum-<version>-linux-x64 --url https://your-app types   # explore without logging in
+./signum-<version>-linux-x64 --url https://your-app types   # explore; entities may need a login
 ```
 
 > **Maintainer setup (one-time):** require the `check` status on `develop` and `main` in branch

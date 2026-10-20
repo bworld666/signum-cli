@@ -8,7 +8,7 @@
  *
  * Skipped unless a live target is named — see test/live-config.ts for the variables:
  *
- *   SIGNUM_LIVE_INSTANCE=renew ./node_modules/.bin/bun test test/m1.live.test.ts
+ *   SIGNUM_LIVE_INSTANCE=<name> ./node_modules/.bin/bun test test/m1.live.test.ts
  */
 
 import { afterAll, describe, expect, it } from "bun:test";
