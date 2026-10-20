@@ -113,10 +113,13 @@ export function parseMetadata(payload: unknown, origin: Metadata["origin"]): Met
  * Is this type an entity — something a member can REFERENCE, i.e. an identity?
  *
  * Reflection lists enums, messages and symbol containers next to entities, so "a type exists by
- * this name" is not enough: an enum-typed member such as `State` would read as an identity.
+ * this name" is not enough: an enum-typed member such as `State` would read as an identity. Nor is
+ * `kind: "Entity"`: it covers every ModifiableEntity, embedded and model types included, and only
+ * an IEntity carries `entityKind` (`ReflectionServer.cs:259-264`). An embedded value is part of its
+ * owner, not a record of its own — it has no id to reference or retrieve.
  */
 export function isEntityTypeInfo(t: TypeInfo | undefined): boolean {
-  return t?.kind === "Entity";
+  return t?.kind === "Entity" && t.entityKind !== undefined;
 }
 
 /** The `--kind` values `signum types` accepts, mapped to KindOfType. */
