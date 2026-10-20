@@ -198,7 +198,7 @@ export class SignumHttp {
       this.opts.trace?.(`< New_Token: ${REDACTED} (adopting)\n`);
       const failure = this.opts.onTokenRotated !== undefined
         ? (this.opts.onTokenRotated(rotated), undefined)
-        : rotateCredential(rotated, this.opts.env);
+        : rotateCredential(this.opts.baseUrl, rotated, this.opts.env);
       if (failure !== undefined) {
         // Surfaced, never swallowed: a lost rotation costs a manual browser step (AC-12.12).
         throw new CliError(`token was rotated by the server but could not be saved: ${failure}`, ExitCode.Unexpected, {
