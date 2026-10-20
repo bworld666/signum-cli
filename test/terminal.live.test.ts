@@ -30,16 +30,17 @@ function childEnv(extra: Record<string, string>): Record<string, string> {
   };
 }
 
-/** Run on a pty. stdout and stderr share it, so `quiet` sends stderr to /dev/null to tell them apart. */
-async function inTerminal(argv: string[], opts: { env?: Record<string, string>; quiet?: boolean } = {}): Promise<{ code: number; screen: string }> {
+/**
+ * Run with stdout on a pty, and return what it wrote there. stderr goes to /dev/null: on a pty the
+ * two share one screen, so any diagnostic (a token rotation warning, a stale-cache note) would land
+ * in the middle of the output under test. Where stderr goes is checked through `piped`.
+ */
+async function inTerminal(argv: string[], opts: { env?: Record<string, string> } = {}): Promise<{ code: number; screen: string }> {
   let screen = "";
   const decoder = new TextDecoder();
   let closed!: () => void;
   const eof = new Promise<void>((resolve) => { closed = resolve; });
-  const cmd = opts.quiet === true
-    ? ["/bin/sh", "-c", 'exec "$@" 2>/dev/null', "sh", process.execPath, CLI, ...argv]
-    : [process.execPath, CLI, ...argv];
-  const proc = Bun.spawn(cmd, {
+  const proc = Bun.spawn(["/bin/sh", "-c", 'exec "$@" 2>/dev/null', "sh", process.execPath, CLI, ...argv], {
     env: childEnv(opts.env ?? {}),
     terminal: {
       cols: 200, rows: 50,
@@ -107,12 +108,12 @@ describe.skipIf(live === undefined || process.platform === "win32")("output in a
   });
 
   it("an error goes to stderr and never to stdout, at a terminal and into a pipe", async () => {
-    const tty = await inTerminal(["query", key, "--column", "NoSuchToken"], { quiet: true });
+    const tty = await inTerminal(["query", key, "--column", "NoSuchToken"]);
     expect(tty.code).toBe(ExitCode.Usage);
     expect(tty.screen).toBe("");
     const pipe = await piped(["query", key, "--column", "NoSuchToken"]);
     expect(pipe.code).toBe(ExitCode.Usage);
     expect(pipe.out).toBe("");
-    expect(pipe.err.startsWith("error: ")).toBe(true);
+    expect(/^error: /m.test(pipe.err)).toBe(true);
   });
 });
