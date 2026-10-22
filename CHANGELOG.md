@@ -3,6 +3,15 @@
 Notable changes to signum-cli. Versions are [SemVer](https://semver.org/), and `package.json` is the
 source of truth: a release tag `v<version>` must match it (see the README's release section).
 
+## Unreleased
+
+### Fixed
+
+- `get` no longer rejects an entity whose response lists `temporalId` after the data members
+  (#150). The serializer moves special members ahead of the data members itself, so such an entity
+  can also be sent back. A response that breaks one of the other rules now says it came from the
+  server, rather than that the CLI refused to send it.
+
 ## 0.2.0 — 2026-10-21
 
 The first full release: milestone **m1**, the read-only core. It follows the pre-releases
