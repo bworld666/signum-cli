@@ -3,6 +3,14 @@
 Notable changes to signum-cli. Versions are [SemVer](https://semver.org/), and `package.json` is the
 source of truth: a release tag `v<version>` must match it (see the README's release section).
 
+## Unreleased
+
+### Fixed
+
+- Output to a pipe is no longer cut off after 64 KiB (#151). The CLI exited before stdout had
+  drained, so a script or agent reading more than that got truncated JSON with exit 0. It now ends
+  once every write has reached the pipe.
+
 ## 0.2.0 — 2026-10-21
 
 The first full release: milestone **m1**, the read-only core. It follows the pre-releases
