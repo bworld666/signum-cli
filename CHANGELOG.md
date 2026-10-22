@@ -3,6 +3,14 @@
 Notable changes to signum-cli. Versions are [SemVer](https://semver.org/), and `package.json` is the
 source of truth: a release tag `v<version>` must match it (see the README's release section).
 
+## Unreleased
+
+### Fixed
+
+- `query` says that a page is partial in every output format, not only in `-o table` (#149). JSON,
+  the default on a pipe, used to carry no marker, so 50 rows of 56 looked like the whole result.
+  The "N of M rows visible to you" line goes to stderr, so stdout still carries only the rows.
+
 ## 0.2.0 — 2026-10-21
 
 The first full release: milestone **m1**, the read-only core. It follows the pre-releases
