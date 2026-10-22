@@ -90,8 +90,20 @@ describe("round trip without corruption (STORY-31)", () => {
     expect([lite, entity]).toHaveLength(2);
   });
 
-  it("refuses a special member after a data member (AC-31.4)", () => {
-    expect(() => asEntity({ Type: "Order", name: "x", modified: true })).toThrow(/modified appears after a data member/);
+  it("reads a special member the server writes after the data members (#150)", () => {
+    const e = asEntity({ Type: "Order", id: 1, name: "x", temporalId: "00000000-0000-0000-0000-000000000000" });
+    expect(e["name"]).toBe("x");
+  });
+
+  it("sends special members before the data members, at every level (AC-31.4, #150)", () => {
+    const e = asEntity(parseLossless(
+      `{"Type":"Order","id":1,"ticks":"5","name":"x","temporalId":"00000000-0000-0000-0000-000000000000",` +
+      `"address":{"Type":"AddressEmbedded","street":"y","modified":false}}`,
+    ));
+    expect(serializeEntity(e).json).toBe(
+      `{"Type":"Order","id":1,"ticks":"5","temporalId":"00000000-0000-0000-0000-000000000000","name":"x",` +
+      `"address":{"Type":"AddressEmbedded","modified":false,"street":"y"}}`,
+    );
   });
 
   it("an MList row keeps rowId first and element second", () => {

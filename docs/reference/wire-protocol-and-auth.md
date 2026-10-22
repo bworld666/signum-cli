@@ -519,7 +519,7 @@ static readonly string[] specialProps = new string[] { "toStr", "id", "isNew", "
 Other read-side constraints from the same method:
 - `"Type"` is **mandatory** — `if (info.Type == null) throw new JsonException(...)` (`:763-764`).
 - `"ticks"` must be a **JSON string**: `long.Parse(reader.GetString()!)` (`:752`). A number throws.
-- `"temporalId"` (GUID string) is a **client→server-only** identity token used to correlate new objects across the round trip (`Signum/Entities/ModifiableEntity.cs:289`; applied at `EntityJsonConverter.cs:629-630, 654-655, 672-673, 709-717`). The server never writes it.
+- `"temporalId"` (GUID string) is a **client→server-only** identity token used to correlate new objects across the round trip (`Signum/Entities/ModifiableEntity.cs:289`; applied at `EntityJsonConverter.cs:629-630, 654-655, 672-673, 709-717`). The framework source never writes it, but a live application was seen to: last in the object, after the data members, as an all-zero GUID (#150). So the ordering rule binds what a client **sends**; a response may break it.
 - Sending `"EntityType"` inside a full entity is an explicit error (`:755`): *"Unexpected property 'EntityType' in full entity JSON. Use 'Type' instead."*
 
 **Property naming** is computed by Signum itself, **independent of `PropertyNamingPolicy`** (`:136-144`):

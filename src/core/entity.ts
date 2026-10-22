@@ -92,10 +92,13 @@ function malformed(message: string): CliError {
 /**
  * Check the invariants the server enforces, over the whole graph, before anything is sent or edited.
  * Each one either throws server-side with a message nobody can act on, or corrupts data.
+ *
+ * Member order is checked on `send` only: the server rejects a late special member it reads, but writes
+ * `temporalId` after the data members itself (#150), so a response in that order is not malformed.
  */
-function assertWellFormed(v: unknown, path: string): void {
+function assertWellFormed(v: unknown, path: string, direction: "read" | "send"): void {
   if (Array.isArray(v)) {
-    v.forEach((item, i) => assertWellFormed(item, `${path}[${i}]`));
+    v.forEach((item, i) => assertWellFormed(item, `${path}[${i}]`, direction));
     return;
   }
   if (!isObject(v)) return;
@@ -111,10 +114,12 @@ function assertWellFormed(v: unknown, path: string): void {
       throw malformed(`${path || "root"}.ticks must be a string`);
     }
     // AC-31.4: a special member after a data member throws (`EntityJsonConverter.cs:455-456`).
-    let seenData = false;
-    for (const key of Object.keys(v)) {
-      if (!SPECIAL.has(key)) seenData = true;
-      else if (seenData) throw malformed(`${path || "root"}.${key} appears after a data member`);
+    if (direction === "send") {
+      let seenData = false;
+      for (const key of Object.keys(v)) {
+        if (!SPECIAL.has(key)) seenData = true;
+        else if (seenData) throw malformed(`${path || "root"}.${key} appears after a data member`);
+      }
     }
   }
 
@@ -123,7 +128,28 @@ function assertWellFormed(v: unknown, path: string): void {
     if (keys[0] !== "rowId" || keys[1] !== "element") throw malformed(`${path} must be {rowId, element}, in that order`);
   }
 
-  for (const [key, child] of Object.entries(v)) assertWellFormed(child, path === "" ? key : `${path}.${key}`);
+  for (const [key, child] of Object.entries(v)) {
+    assertWellFormed(child, path === "" ? key : `${path}.${key}`, direction);
+  }
+}
+
+/**
+ * Move every entity's special members ahead of its data members, keeping the order within each group
+ * (AC-31.4). A fetched entity can carry `temporalId` last (#150); sent back unchanged, it would throw.
+ */
+function hoistSpecialMembers(v: unknown): void {
+  if (Array.isArray(v)) {
+    v.forEach(hoistSpecialMembers);
+    return;
+  }
+  if (!isObject(v)) return;
+  if (Object.hasOwn(v, "Type")) {
+    const entries = Object.entries(v);
+    for (const [key] of entries) delete v[key];
+    for (const [key, value] of entries) if (SPECIAL.has(key)) v[key] = value;
+    for (const [key, value] of entries) if (!SPECIAL.has(key)) v[key] = value;
+  }
+  Object.values(v).forEach(hoistSpecialMembers);
 }
 
 /** Validate a response body as an entity. The response is the only source of one. */
@@ -131,7 +157,7 @@ export function asEntity(body: unknown): EntityJson {
   if (!isEntity(body)) {
     throw new CliError("expected an entity in the response, got something else", ExitCode.Unexpected);
   }
-  assertWellFormed(body, "");
+  assertWellFormed(body, "", "read");
   return body;
 }
 
@@ -256,15 +282,16 @@ function assertEntityPayload(p: EntityPayload): void {
 /**
  * The only way to produce entity JSON for the server: check the graph, propagate `modified`, write it.
  *
- * It CHANGES `root`: `modified` is raised on every ancestor of a change and client-side `error`
- * members are dropped, as the web client does. Flags are only ever raised, so serializing twice — a
+ * It CHANGES `root`: special members are moved ahead of the data members, `modified` is raised on
+ * every ancestor of a change and client-side `error` members are dropped, as the web client does. Flags are only ever raised, so serializing twice — a
  * preview, then the real send — produces the same payload.
  *
  * `modified` on the result says whether the payload asks the server to change anything — false means
  * the server will apply nothing, and a caller must not report that as a save (AC-32.4).
  */
 export function serializeEntity(root: EntityJson): EntityPayload {
-  assertWellFormed(root, "");
+  hoistSpecialMembers(root);
+  assertWellFormed(root, "", "send");
   const modified = propagateModified(root);
   return { json: JSON.stringify(root), modified, [ENTITY_PAYLOAD]: true };
 }
