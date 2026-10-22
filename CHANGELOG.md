@@ -8,8 +8,9 @@ source of truth: a release tag `v<version>` must match it (see the README's rele
 ### Fixed
 
 - `get` no longer rejects an entity whose response lists `temporalId` after the data members
-  (#150). Member order is checked only before a body is sent, and the serializer now moves special
-  members ahead of the data members itself, so such an entity can also be sent back.
+  (#150). The serializer moves special members ahead of the data members itself, so such an entity
+  can also be sent back. A response that breaks one of the other rules now says it came from the
+  server, rather than that the CLI refused to send it.
 
 ## 0.2.0 — 2026-10-21
 

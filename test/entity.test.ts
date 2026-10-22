@@ -78,6 +78,14 @@ describe("round trip without corruption (STORY-31)", () => {
     expect(() => asEntity(parseLossless(`{"Type":"Order","id":1,"ticks":5,"modified":false}`))).toThrow(/ticks/);
   });
 
+  it("says a broken response came from the server, not that a send was refused (#150)", () => {
+    const read = (): unknown => asEntity(parseLossless(`{"Type":"Order","id":1,"ticks":5}`));
+    expect(read).toThrow(/^unexpected entity JSON in the response — root\.ticks must be a string$/);
+    const e = fresh() as Record<string, unknown>;
+    e["ticks"] = 5;
+    expect(() => serializeEntity(e as EntityJson)).toThrow(/^internal: refusing to send malformed entity JSON/);
+  });
+
   it("refuses an object carrying both Type and EntityType (AC-31.1)", () => {
     expect(() => asEntity({ Type: "Order", EntityType: "Order", id: null })).toThrow(/both Type and EntityType/);
   });
