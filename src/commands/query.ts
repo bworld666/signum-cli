@@ -381,13 +381,6 @@ async function runTable(
   // invites false confidence, which is worse than none.
   const note = disclosure(ctx.privacy, table.pseudonymized);
   if (note !== "") ctx.io.err("\n" + note);
-
-  // Total is reported distinctly from rows returned, so a page is never mistaken for all (AC-21.5).
-  // In every format: a pipe gets JSON by default, and a script or agent reading it is the caller
-  // least likely to notice a page of 50 that looks complete (#149). stderr keeps stdout clean.
-  if (table.totalElements !== undefined && table.totalElements > table.rows.length) {
-    ctx.io.err(`\n${table.rows.length} of ${table.totalElements} rows visible to you (use --top, --page, or --all)\n`);
-  }
   return ExitCode.Ok;
 }
 
