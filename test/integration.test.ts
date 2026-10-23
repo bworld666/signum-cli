@@ -134,7 +134,9 @@ const SUB_TOKENS: Record<string, unknown[]> = {
   // named --column and --order against parseTokens, so a token this list omits now fails the way a
   // genuinely invalid one does — which is exactly what caught this fixture being short of `Total`.
   "": [
-    { key: "Id", fullKey: "Id", niceName: "Id", filterType: "Integer", type: { name: "number" }, isGroupable: true },
+    // `propertyRoute` as for a query column declared `e.Id`: it names the type whose id this is (#157).
+    { key: "Id", fullKey: "Id", niceName: "Id", filterType: "Integer", type: { name: "number" }, isGroupable: true,
+      propertyRoute: "(Order).Id" },
     { key: "Entity", fullKey: "Entity", niceName: "Order", type: { name: "Order" }, isGroupable: true },
     { key: "State", fullKey: "State", niceName: "State", type: { name: "string" }, isGroupable: true },
     { key: "Total", fullKey: "Total", niceName: "Total", filterType: "Decimal", type: { name: "decimal" }, isGroupable: true },
@@ -223,6 +225,9 @@ const EXACT_RESULT_TABLE =
   `{"EntityType":"Customer","id":9007199254740995,"model":"Anna Müller"}]}],"totalElements":1}`;
 /** When set, every executeQuery answers with EXACT_RESULT_TABLE. */
 let exactResultTable = false;
+/** When set, every executeQuery answers with an `Id` column beside the entity (#157). */
+let idResultTable = false;
+const ID_RESULT_TABLE = { columns: ["Id"], rows: [{ entity: { EntityType: "Order", id: 42 }, columns: [42] }], totalElements: 1 };
 /**
  * Serve reflection as Signum.Authorization does (AuthServer.cs:70-176).
  *   full       TypeAuthLogic and QueryAuthLogic: no entity at all to an anonymous caller, and to a
@@ -385,6 +390,9 @@ beforeAll(() => {
           : `[{"Type":"Order","id":1,"ticks":"638","toStr":"Order 1","name":"Acme GmbH",` +
             `"customer":{"EntityType":"Customer","id":7,"model":"Anna Müller"}}]`,
           { headers });
+      }
+      if (url.pathname.startsWith("/api/query/executeQuery/") && idResultTable) {
+        return new Response(JSON.stringify(ID_RESULT_TABLE), { headers });
       }
       if (url.pathname.startsWith("/api/query/executeQuery/") && exactResultTable) {
         return new Response(EXACT_RESULT_TABLE, { headers });
@@ -1080,6 +1088,30 @@ describe("query (STORY-20, STORY-21, STORY-22)", () => {
       expect(g.out).toContain(`"${handle}"`);
       // The store maps the handle to the EXACT record, so unmask resolves to the right one.
       expect(loadHandles({ SIGNUM_CONFIG_DIR: configDir } as NodeJS.ProcessEnv)[handle]).toBe("Customer;9007199254740995");
+    });
+  });
+
+  /**
+   * An `Id` column used to give an agent the real database id under the default policy, with a
+   * disclosure saying nothing was replaced (#157). The route `parseTokens` returns names the type, so
+   * the id becomes the same handle the record's `Entity` column gets.
+   */
+  describe("an id column is an identity (#157)", () => {
+    beforeAll(() => { idResultTable = true; });
+    afterAll(() => { idResultTable = false; });
+
+    it("becomes the record's handle under an agent, and the disclosure names it", async () => {
+      const r = await cli(["query", "Order", "--column", "Entity", "--column", "Id", "--json"], { env: { CLAUDECODE: "1" } });
+      expect(r.code).toBe(ExitCode.Ok);
+      const row = (JSON.parse(r.out) as Array<Record<string, unknown>>)[0] ?? {};
+      expect(String(row["Id"])).toStartWith(HANDLE_PREFIX);
+      expect(row["Id"]).toBe(row["Entity"]);
+      expect(r.err).toContain("pseudonymized (heuristic): Entity, Id");
+    });
+
+    it("stays the real id for a human at a terminal", async () => {
+      const r = await cli(["query", "Order", "--column", "Id", "--json"], { tty: true });
+      expect((JSON.parse(r.out) as Array<Record<string, unknown>>)[0]?.["Id"]).toBe(42);
     });
   });
 
