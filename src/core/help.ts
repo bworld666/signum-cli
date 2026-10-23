@@ -212,7 +212,9 @@ export const COMMANDS: CommandSpec[] = [
     description:
       "Results, totals and --count include only the rows your permissions allow. The server " +
       "removes the others silently and the response carries no marker that it did, so a result " +
-      "is complete for you, not necessarily for the database (AC-08.6).",
+      "is complete for you, not necessarily for the database (AC-08.6). A page that is not the " +
+      "whole result says so on stderr in every format (\"50 of 56 rows visible to you\"), and " +
+      "stdout carries only the rows (AC-21.5).",
     flags: [
       { name: "filter", arg: "<expr>", summary: "Filter expression; repeatable (AND). See `signum help filter`" },
       { name: "filter-json", arg: "<file|@file|->", summary: "Raw FilterTS[] JSON; combines with --filter (AND)" },

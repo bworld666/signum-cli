@@ -1095,6 +1095,15 @@ describe("query (STORY-20, STORY-21, STORY-22)", () => {
     expect(r.err).toContain("2 of 7 rows"); // AC-21.5
   });
 
+  it("says a JSON page is partial on stderr, and stdout carries only its rows (AC-21.5, #149)", async () => {
+    // JSON is the default on a pipe, and it used to carry no marker: 50 rows that looked complete.
+    // Every other format is covered where the line is written, in output.test.ts.
+    const r = await cli(["query", "Order", "--json"]);
+    expect(r.code).toBe(ExitCode.Ok);
+    expect(r.err).toContain("2 of 7 rows visible to you");
+    expect(JSON.parse(r.out)).toHaveLength(2);
+  });
+
   it("--explain sends nothing and prints the request (AC-20.6)", async () => {
     const r = await cli(["query", "Order", "--explain"]);
     expect(r.code).toBe(ExitCode.Ok);
