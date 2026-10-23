@@ -2893,3 +2893,51 @@ describe("caller-context override end-to-end (AC-50.4) — previously only unit-
     expect(r.code).toBe(ExitCode.Usage);
   });
 });
+
+/**
+ * The CLI as a real process with stdout on a pipe (#151). In-process tests collect `io.out` into a
+ * string and never see the pipe, so they missed that exiting right after the last write kept only
+ * the first 64 KiB — exit 0, nothing on stderr, and truncated JSON for every script and agent.
+ */
+describe("piped stdout is delivered in full (#151)", () => {
+  const TYPES = 3000;
+  let big: ReturnType<typeof Bun.serve>;
+  let bigUrl: string;
+
+  beforeAll(() => {
+    const reflection = Object.fromEntries(Array.from({ length: TYPES }, (_, i) => [`Type${i}Entity`, {
+      kind: "Entity", entityKind: "Main", niceName: `Type ${i}`, queryDefined: true,
+      members: { Id: { type: { name: "number" }, niceName: "Id" } }, operations: {},
+    }]));
+    big = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const headers = { "content-type": "application/json" };
+        if (new URL(req.url).pathname === "/api/reflection/types") return new Response(JSON.stringify(reflection), { headers });
+        return new Response(JSON.stringify({ exceptionMessage: "unhandled" }), { status: 404, headers });
+      },
+    });
+    bigUrl = `http://127.0.0.1:${big.port}`;
+  });
+  afterAll(() => big.stop(true));
+
+  it("more than 64 KiB of JSON on a pipe arrives complete and parses", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "signum-pipe-"));
+    try {
+      // Through `sh -c '… | cat'`, because Bun.spawn's "pipe" is not an OS pipe: the CLI wrote all of
+      // its output into it even before the fix. A shell pipe is what a user's pipeline gets.
+      const cliPath = join(import.meta.dir, "..", "src", "cli.ts");
+      const proc = Bun.spawn(["/bin/sh", "-c", '"$0" "$@" | cat', process.execPath, cliPath, "types", "--url", bigUrl, "-o", "json"], {
+        env: { PATH: "/usr/bin:/bin", HOME: dir, SIGNUM_CONFIG_DIR: join(dir, "config") },
+        stdin: "ignore", stdout: "pipe", stderr: "pipe",
+      });
+      // The exit status here is cat's; help.test.ts checks the CLI's own, as a real process.
+      const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+      expect(err).toBe("");
+      expect(out.length).toBeGreaterThan(64 * 1024);
+      expect((JSON.parse(out) as unknown[]).length).toBe(TYPES);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
