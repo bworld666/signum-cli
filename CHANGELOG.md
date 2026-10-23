@@ -3,7 +3,12 @@
 Notable changes to signum-cli. Versions are [SemVer](https://semver.org/), and `package.json` is the
 source of truth: a release tag `v<version>` must match it (see the README's release section).
 
-## Unreleased
+## 0.2.1 — 2026-10-23
+
+A patch release of the read-only core. Four of the fixes come from using 0.2.0 against a live
+application (#149 to #152); #157 was found while fixing #152. Two concern privacy under an AI
+caller: an `Id` column no longer reaches it as the real database id (#157), and an allowlist in
+`privacy.json` now reads some members and nothing else (#152).
 
 ### Fixed
 
