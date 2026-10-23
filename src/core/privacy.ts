@@ -630,10 +630,52 @@ export function pseudonymizeDocument(
   const element = (n: unknown, path: string): unknown => {
     const name = path.split(".").pop() ?? path;
     const decision = sensitivity({ name, value: n }, policy);
-    if (decision.reason === "policy-allow") return n; // whole, as for a member — see `walk`
+    if (decision.reason === "policy-allow") return allowed(n, path);
     if (!decision.pseudonymize) return walk(n, path);
     seen.push(name);
     return surrogate(n, name, policy, recorder);
+  };
+
+  // The value is passed in, which is what fixes the leak: a nested Lite is an identity even though
+  // `Customer` matches no name heuristic. Previously this path saw the NAME only, so `get` emitted
+  // real entity types, real ids and real labels under the default policy — and reported that it had
+  // pseudonymized nothing.
+  const member = (key: string, v: unknown, path: string): unknown => {
+    const decision = sensitivity({ name: key, value: v }, policy);
+    if (decision.reason === "policy-allow") return allowed(v, path);
+    if (decision.pseudonymize) {
+      // A sensitive value is replaced WHOLE, object or not. Recursing into something already judged
+      // sensitive would emit its parts while claiming the whole was protected.
+      seen.push(key);
+      return surrogate(v, key, policy, recorder);
+    }
+    return walk(v, path);
+  };
+
+  /**
+   * An allowlisted value shows what the query path shows for an allowed column, and no more (#152).
+   * A scalar or a Lite is shown as it is: the identity and display text are what was allowed. A
+   * nested entity — a referenced one or an embedded one — shows its own display string, and every
+   * member it carries is still judged on its own: an allow entry names a member, and must not
+   * unmask the whole record behind it, which `query` would only ever show as a Lite. The same goes
+   * for the entity a loaded Lite carries, and for each MList row's element.
+   */
+  const allowed = (v: unknown, path: string): unknown => {
+    if (Array.isArray(v)) return v.map((n) => allowed(n, path));
+    if (v === null || typeof v !== "object" || v instanceof JsonNumber) return v;
+    const o = v as Record<string, unknown>;
+    if (Object.hasOwn(o, "rowId") && Object.hasOwn(o, "element")) {
+      return { ...o, element: allowed(o["element"], path) }; // an MList row is framing, not data
+    }
+    if (typeof o["EntityType"] === "string") {
+      return Object.hasOwn(o, "entity") ? { ...o, entity: walk(o["entity"], `${path}.entity`) } : o;
+    }
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(o)) {
+      const keep = key === "toStr" || STRUCTURAL_KEYS.has(key.toLowerCase());
+      out[key] = keep ? child : member(key, child, `${path}.${key}`);
+    }
+    return out;
   };
 
   const walk = (node: unknown, path: string): unknown => {
@@ -642,28 +684,7 @@ export function pseudonymizeDocument(
 
     const out: Record<string, unknown> = {};
     for (const [key, v] of Object.entries(node as Record<string, unknown>)) {
-      if (STRUCTURAL_KEYS.has(key.toLowerCase())) {
-        out[key] = v;
-        continue;
-      }
-      // The value is passed in, which is what fixes the leak: a nested Lite is an identity even
-      // though `Customer` matches no name heuristic. Previously this path saw the NAME only, so
-      // `get` emitted real entity types, real ids and real labels under the default policy — and
-      // reported that it had pseudonymized nothing.
-      const decision = sensitivity({ name: key, value: v }, policy);
-      if (decision.reason === "policy-allow") {
-        // A human allowlisted this member, so its value is emitted WHOLE, as the query path emits an
-        // allowed column. Walking into it re-judged its parts: under `strict` an allowed reference
-        // kept its id and lost its display text, while `query` and `explain --privacy` showed it (#152).
-        out[key] = v;
-      } else if (decision.pseudonymize) {
-        // A sensitive value is replaced WHOLE, object or not. Recursing into something already
-        // judged sensitive would emit its parts while claiming the whole was protected.
-        out[key] = surrogate(v, key, policy, recorder);
-        seen.push(key);
-      } else {
-        out[key] = walk(v, path === "" ? key : `${path}.${key}`);
-      }
+      out[key] = STRUCTURAL_KEYS.has(key.toLowerCase()) ? v : member(key, v, path === "" ? key : `${path}.${key}`);
     }
     return out;
   };

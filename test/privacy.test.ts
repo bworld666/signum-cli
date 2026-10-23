@@ -343,11 +343,16 @@ describe("entity documents protect nested identities (the get leak)", () => {
 
 /**
  * Reading some members and nothing else (#152). `strict` with an allowlist is that: the allowed
- * members are emitted, everything else is masked. `get` walked INTO an allowed member and re-judged its
+ * members are shown, everything else is masked. `get` walked INTO an allowed member and re-judged its
  * parts, so under `strict` an allowed reference kept its id and lost its display text, while `query`
  * and `explain --privacy` showed it.
+ *
+ * The first fix emitted an allowed member whole, which was a leak of its own (security review of
+ * #156): a `get` document can carry a referenced entity in full, so allowing `Customer` showed the
+ * customer's email, phone and nested references. An allowed value now shows what `query` would show
+ * for an allowed column — identity and display text — and whatever it contains is judged on its own.
  */
-describe("an allowlisted member is emitted whole under strict (#152)", () => {
+describe("an allowlisted member shows what query would show, and no more (#152)", () => {
   const COLUMN = { EntityType: "BoardColumn", id: 3, model: "In Progress" };
   const LABELS = [{ EntityType: "Label", id: 1, model: "urgent" }];
   const TASK = { Type: "Task", id: 7, toStr: "Fix the boiler", ticks: "1", title: "Fix the boiler", column: COLUMN, labels: LABELS };
@@ -372,6 +377,40 @@ describe("an allowlisted member is emitted whole under strict (#152)", () => {
     const doc = pseudonymizeDocument({ Type: "Task", id: 7, column: COLUMN }, p).value as Record<string, unknown>;
     expect(doc["column"]).toEqual(table.rows[0]?.values[table.columns.indexOf("Column")]);
   });
+
+  /** What allowing `Customer` must NOT reveal: everything a full record carries beyond its label. */
+  const SECRETS = ["erika@example.invalid", "+49 170 0000000", "Musterstr. 1", "Max Muster"];
+  const CUSTOMER = {
+    Type: "Customer", id: 9, ticks: "1", toStr: "Erika Mustermann",
+    email: "erika@example.invalid", phone: "+49 170 0000000",
+    address: { Type: "AddressEmbedded", toStr: "Musterstr. 1", street: "Musterstr. 1" },
+    accountManager: { EntityType: "Employee", id: 4, model: "Max Muster" },
+  };
+  const shown = (doc: unknown): string => JSON.stringify(doc);
+
+  for (const mode of ["heuristic", "strict"] as const) {
+    it(`shows a referenced entity's display text but judges its members on their own (${mode})`, () => {
+      writeFileSync(join(dir, "privacy.json"), JSON.stringify({ mode, allow: ["Customer"] }));
+      const out = pseudonymizeDocument({ Type: "Order", id: 1, customer: structuredClone(CUSTOMER) }, policy());
+      const customer = (out.value as Record<string, Record<string, unknown>>)["customer"] ?? {};
+      expect(customer["toStr"]).toBe("Erika Mustermann");
+      expect(customer["id"]).toBe(9);
+      for (const secret of SECRETS) expect(shown(out.value)).not.toContain(secret);
+      expect(String(customer["accountManager"])).toStartWith(HANDLE_PREFIX);
+      expect(out.pseudonymized).toContain("email");
+    });
+
+    it(`judges the entity inside a loaded Lite and each MList row's element on their own (${mode})`, () => {
+      writeFileSync(join(dir, "privacy.json"), JSON.stringify({ mode, allow: ["Customer", "Customers"] }));
+      const loaded = { EntityType: "Customer", id: 9, model: "Erika Mustermann", entity: structuredClone(CUSTOMER) };
+      const rows = [{ rowId: 5, element: structuredClone(CUSTOMER) }];
+      const out = pseudonymizeDocument({ Type: "Order", id: 1, customer: loaded, customers: rows }, policy());
+      const doc = out.value as Record<string, unknown>;
+      expect((doc["customer"] as Record<string, unknown>)["model"]).toBe("Erika Mustermann");
+      expect((doc["customers"] as Array<Record<string, unknown>>)[0]?.["rowId"]).toBe(5);
+      for (const secret of SECRETS) expect(shown(doc)).not.toContain(secret);
+    });
+  }
 });
 
 /**
