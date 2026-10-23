@@ -542,8 +542,12 @@ export function resolvePolicy(opts: ResolvePolicyOptions): PrivacyPolicy {
       mode = opts.requested;
     } else if (opts.acknowledged) {
       // Loosening under an agent is possible but never quiet (AC-50.4's asymmetry, AC-52.10).
+      // The narrow alternative is named here, where the wide one is taken: `off` exposes every member,
+      // and a caller who needs a few was reaching for it because nothing said there was another way (#152).
       opts.warn?.(
-        `warning: pseudonymization loosened to '${opts.requested}' under a detected AI caller\n`,
+        `warning: pseudonymization loosened to '${opts.requested}' under a detected AI caller\n` +
+        `To read only some members, list them under "allow" in privacy.json with "mode": "strict"\n` +
+        "instead; see `signum help pseudonymization`.\n",
       );
       mode = opts.requested;
     } else {
@@ -626,6 +630,7 @@ export function pseudonymizeDocument(
   const element = (n: unknown, path: string): unknown => {
     const name = path.split(".").pop() ?? path;
     const decision = sensitivity({ name, value: n }, policy);
+    if (decision.reason === "policy-allow") return n; // whole, as for a member — see `walk`
     if (!decision.pseudonymize) return walk(n, path);
     seen.push(name);
     return surrogate(n, name, policy, recorder);
@@ -646,7 +651,12 @@ export function pseudonymizeDocument(
       // `get` emitted real entity types, real ids and real labels under the default policy — and
       // reported that it had pseudonymized nothing.
       const decision = sensitivity({ name: key, value: v }, policy);
-      if (decision.pseudonymize) {
+      if (decision.reason === "policy-allow") {
+        // A human allowlisted this member, so its value is emitted WHOLE, as the query path emits an
+        // allowed column. Walking into it re-judged its parts: under `strict` an allowed reference
+        // kept its id and lost its display text, while `query` and `explain --privacy` showed it (#152).
+        out[key] = v;
+      } else if (decision.pseudonymize) {
         // A sensitive value is replaced WHOLE, object or not. Recursing into something already
         // judged sensitive would emit its parts while claiming the whole was protected.
         out[key] = surrogate(v, key, policy, recorder);

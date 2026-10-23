@@ -14,6 +14,10 @@ source of truth: a release tag `v<version>` must match it (see the README's rele
 - Output to a pipe is no longer cut off after 64 KiB (#151). The CLI exited before stdout had
   drained, so a script or agent reading more than that got truncated JSON with exit 0. It now ends
   once every write has reached the pipe.
+- `get` shows an allowlisted member whole under `strict`, as `query` does (#152). It used to mask
+  the display text of an allowed reference. `privacy.json` with `"mode": "strict"` and an `allow`
+  list now reads some members and nothing else on every command, and the warning printed when
+  pseudonymization is loosened to `off` points to it.
 
 ## 0.2.0 — 2026-10-21
 

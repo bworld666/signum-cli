@@ -14,6 +14,7 @@ import {
   disclosure, HANDLE_PREFIX, isIdentityValue, parseMode, pseudonymizeDocument, sensitivity,
   resolvePolicy, surrogate,
 } from "../src/core/privacy.ts";
+import { resolveResultTable } from "../src/core/resulttable.ts";
 import { UsageError } from "../src/core/errors.ts";
 import { JsonNumber, parseLossless } from "../src/core/json.ts";
 
@@ -49,6 +50,8 @@ describe("mode resolution — the policy is not the caller's to weaken (AC-52.10
     const p = policy({ requested: "off", acknowledged: true, warn: (l) => warnings.push(l) });
     expect(p.mode).toBe("off");
     expect(warnings.join()).toContain("loosened");
+    // ...and names the narrow alternative, so `off` is not the only way anyone finds (#152).
+    expect(warnings.join()).toContain(`list them under "allow" in privacy.json`);
   });
 
   it("a human at a terminal may loosen freely — there is nothing to protect them from", () => {
@@ -335,6 +338,39 @@ describe("entity documents protect nested identities (the get leak)", () => {
     const fromDocument = (pseudonymizeDocument({ Customer: lite }, policy()).value as Record<string, unknown>)["Customer"];
     const fromValue = surrogate(lite, "Customer", policy());
     expect(fromDocument).toBe(fromValue);
+  });
+});
+
+/**
+ * Reading some members and nothing else (#152). `strict` with an allowlist is that: the allowed
+ * members are emitted, everything else is masked. `get` walked INTO an allowed member and re-judged its
+ * parts, so under `strict` an allowed reference kept its id and lost its display text, while `query`
+ * and `explain --privacy` showed it.
+ */
+describe("an allowlisted member is emitted whole under strict (#152)", () => {
+  const COLUMN = { EntityType: "BoardColumn", id: 3, model: "In Progress" };
+  const LABELS = [{ EntityType: "Label", id: 1, model: "urgent" }];
+  const TASK = { Type: "Task", id: 7, toStr: "Fix the boiler", ticks: "1", title: "Fix the boiler", column: COLUMN, labels: LABELS };
+
+  it("shows an allowed reference and list with their display text, and masks the rest", () => {
+    writeFileSync(join(dir, "privacy.json"), JSON.stringify({ mode: "strict", allow: ["Column", "Labels"] }));
+    const doc = pseudonymizeDocument(structuredClone(TASK), policy()).value as Record<string, unknown>;
+    expect(doc["column"]).toEqual(COLUMN);
+    expect(doc["labels"]).toEqual(LABELS);
+    expect(doc["title"]).not.toBe("Fix the boiler");
+    expect(doc["toStr"]).not.toBe("Fix the boiler");
+    expect(String(doc["id"])).toStartWith(HANDLE_PREFIX);
+  });
+
+  it("emits an allowed member exactly as the query path emits an allowed column", () => {
+    writeFileSync(join(dir, "privacy.json"), JSON.stringify({ mode: "strict", allow: ["Column"] }));
+    const p = policy();
+    const table = resolveResultTable(
+      { columns: ["Column"], rows: [{ entity: { EntityType: "Task", id: 7 }, columns: [COLUMN] }] },
+      { requestedColumns: ["Column"], privacy: p },
+    );
+    const doc = pseudonymizeDocument({ Type: "Task", id: 7, column: COLUMN }, p).value as Record<string, unknown>;
+    expect(doc["column"]).toEqual(table.rows[0]?.values[table.columns.indexOf("Column")]);
   });
 });
 
