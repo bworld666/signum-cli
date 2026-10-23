@@ -11,6 +11,9 @@ source of truth: a release tag `v<version>` must match it (see the README's rele
   (#150). The serializer moves special members ahead of the data members itself, so such an entity
   can also be sent back. A response that breaks one of the other rules now says it came from the
   server, rather than that the CLI refused to send it.
+- Output to a pipe is no longer cut off after 64 KiB (#151). The CLI exited before stdout had
+  drained, so a script or agent reading more than that got truncated JSON with exit 0. It now ends
+  once every write has reached the pipe.
 
 ## 0.2.0 — 2026-10-21
 
