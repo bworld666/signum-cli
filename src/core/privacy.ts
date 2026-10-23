@@ -149,7 +149,7 @@ export interface SensitivityInput {
  *                                       inference including the identity rule, which is what makes
  *                                       allowlisting `Entity` a usable workaround
  *   3. explicit always                — a human said this one is not
- *   4. identity (value / type / label) — identifying by construction, whatever it is called
+ *   4. identity (value / type / label / id) — identifying by construction, whatever it is called
  *   5. name heuristics                — English and German member names (AC-52.4)
  *   6. strict                         — allowlist-only, so anything left is replaced
  *
@@ -238,7 +238,24 @@ function isEntityLabelName(name: string): boolean {
 const TOKEN_PATH_SPLIT = /(?<!\[[^\]]*)\.(?![^[]*\])/;
 
 /**
- * The ways we can know a member denotes an entity, none of which is its name.
+ * A column or member that IS an entity's id (#157): `Entity.Id`, `Id`, `Entity.Customer.Id`.
+ *
+ * The other half of a Lite, and the same blind spot as the display string (#105): a plain number
+ * named `Id` matches no heuristic and is no Lite, so both halves of the classifier passed the real
+ * database id to an agent under the DEFAULT policy — the very thing `ref_` handles exist to hide
+ * (ADR 0007, "Identifiers are the hard part"). `Id` is the framework's own key for the id token
+ * (`EntityPropertyToken.IdProperty`), so it is recognised by name and case exactly. A document's
+ * `id` member never reaches this: `pseudonymizeDocument` treats it structurally.
+ */
+const ENTITY_ID_SEGMENT = "Id";
+
+function isEntityIdName(name: string): boolean {
+  return name.split(TOKEN_PATH_SPLIT).pop() === ENTITY_ID_SEGMENT;
+}
+
+/**
+ * The ways we can know a member denotes an entity. None is a guess from its name: `ToString`,
+ * `toStr` and `Id` are the framework's own keys, not words a heuristic matched.
  *
  * Display strings are handled by the caller so they can be reported as `entity-label`; this
  * deliberately keeps the label checks too, so the predicate stays true to its name for any future
@@ -247,6 +264,7 @@ const TOKEN_PATH_SPLIT = /(?<!\[[^\]]*)\.(?![^[]*\])/;
 function isIdentityInput(input: SensitivityInput): boolean {
   if (input.isEntityLabel === true) return true;
   if (isEntityLabelName(input.name)) return true;
+  if (isEntityIdName(input.name)) return true;
   if (input.value !== undefined && isIdentityValue(input.value)) return true;
   if (input.memberType !== undefined && input.isEntityType?.(input.memberType) === true) return true;
   return false;

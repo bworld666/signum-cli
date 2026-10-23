@@ -15,6 +15,7 @@ import {
   resolvePolicy, surrogate,
 } from "../src/core/privacy.ts";
 import { resolveResultTable } from "../src/core/resulttable.ts";
+import { idColumnTypes, type QueryTokenInfo } from "../src/core/tokens.ts";
 import { UsageError } from "../src/core/errors.ts";
 import { JsonNumber, parseLossless } from "../src/core/json.ts";
 
@@ -454,5 +455,57 @@ describe("the disclosure names the frequency limit (review finding)", () => {
     const d = disclosure(policy(), ["State"]);
     expect(d).toContain("FEW DISTINCT VALUES");
     expect(d).toContain("counting");
+  });
+});
+
+/**
+ * An entity's id is an identity (#157). A plain number named `Id` matched no heuristic and was no
+ * Lite, so `--column Entity.Id` gave an agent the real database id under the DEFAULT policy, and the
+ * disclosure said nothing was replaced — the other half of a Lite, missed as its label once was (#105).
+ */
+describe("an entity's id is an identity (#157)", () => {
+  it("is recognised by the framework's own key, on the last segment only", () => {
+    for (const name of ["Id", "Entity.Id", "Entity.Customer.Id"]) {
+      expect(sensitivityOf(name, policy())).toMatchObject({ pseudonymize: true, reason: "identity" });
+    }
+    for (const name of ["ExternalId", "Idea", "Entity.Id.Something", "Valid"]) {
+      expect(sensitivityOf(name, policy()).reason).not.toBe("identity");
+    }
+  });
+
+  it("is left alone when a human allowlisted it, as any identity is", () => {
+    writeFileSync(join(dir, "privacy.json"), JSON.stringify({ allow: ["Id"] }));
+    expect(sensitivityOf("Entity.Id", policy())).toMatchObject({ pseudonymize: false, reason: "policy-allow" });
+  });
+
+  it("becomes the record's own handle when its type is known, and is still masked when it is not", () => {
+    const p = policy();
+    const table = resolveResultTable(
+      {
+        columns: ["Entity.Id", "Entity.Customer.Id", "Id"],
+        rows: [{ entity: { EntityType: "Order", id: 7 }, columns: [7, 9, 7] }],
+      },
+      { requestedColumns: ["Entity", "Entity.Id", "Entity.Customer.Id", "Id"], idTypes: { "Entity.Id": "Order", "Entity.Customer.Id": "Customer" }, privacy: p },
+    );
+    const at = (c: string) => table.rows[0]?.values[table.columns.indexOf(c)];
+    expect(at("Entity.Id")).toBe(at("Entity"));
+    expect(String(at("Entity.Customer.Id"))).toStartWith(HANDLE_PREFIX);
+    expect(table.mintedHandles[String(at("Entity.Customer.Id"))]).toBe("Customer;9");
+    expect(typeof at("Id")).toBe("number");
+    expect(at("Id")).not.toBe(7);
+    expect(table.pseudonymized).toEqual(expect.arrayContaining(["Entity.Id", "Entity.Customer.Id", "Id"]));
+  });
+
+  it("takes its type from the property route the server returns", () => {
+    const info = (fullKey: string, propertyRoute?: string): QueryTokenInfo => ({
+      key: fullKey.split(".").pop() ?? fullKey, fullKey, niceName: undefined, toStr: undefined, kind: undefined,
+      type: "number", filterType: "Integer", isGroupable: true, usableInQuery: true, propertyRoute,
+    });
+    expect(idColumnTypes([
+      info("Entity.Customer.Id", "(Customer).Id"),
+      info("Id", "(Order).Id"),
+      info("Entity.Customer.Name", "(Customer).Name"),
+      info("Entity.Owner.Id"),
+    ])).toEqual({ "Entity.Customer.Id": "Customer", Id: "Order" });
   });
 });

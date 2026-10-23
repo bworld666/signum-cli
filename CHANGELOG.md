@@ -22,6 +22,10 @@ source of truth: a release tag `v<version>` must match it (see the README's rele
   member by member, so allowing `Customer` does not reveal the customer's email. `privacy.json`
   with `"mode": "strict"` and an `allow` list now reads some members and nothing else on every
   command, and the warning printed when pseudonymization is loosened to `off` points to it.
+- An `Id` column (`--column Entity.Id`, `Id`, `Entity.Customer.Id`) no longer gives an AI caller
+  the real database id under the default policy (#157), and the stderr note no longer says nothing
+  was replaced. The id becomes the record's `ref_` handle, the same one its `Entity` column gets,
+  when the server's property route names the type; otherwise it is masked as a plain value.
 
 ## 0.2.0 — 2026-10-21
 
